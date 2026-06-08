@@ -559,6 +559,25 @@ class SupabaseLibraryDB {
 
   async deleteMember(libraryId, memberId) {
     if (this.isSupabase) {
+      // 1. Get all active issues for this member to reset books status
+      const { data: activeIssues, error: issueErr } = await this.client
+        .from('issues')
+        .select('book_id')
+        .eq('member_id', memberId)
+        .eq('library_id', libraryId)
+        .eq('status', 'issued');
+      
+      if (!issueErr && activeIssues && activeIssues.length > 0) {
+        const bookIds = activeIssues.map(i => i.book_id);
+        // Reset these books to 'available'
+        await this.client
+          .from('books')
+          .update({ availability: 'available' })
+          .in('id', bookIds)
+          .eq('library_id', libraryId);
+      }
+
+      // 2. Delete the member (cascades and deletes all issues records)
       const { error } = await this.client
         .from('members')
         .delete()
@@ -567,9 +586,27 @@ class SupabaseLibraryDB {
       if (error) throw error;
       return true;
     } else {
+      // LocalStorage Mode
       let members = this._getLocal('smart_lib_members');
+      let issues = this._getLocal('smart_lib_issues');
+      let books = this._getLocal('smart_lib_books');
+
+      // Find active books checked out by this member
+      const memberIssues = issues.filter(i => i.memberId === memberId && i.libraryId === libraryId && i.status === 'issued');
+      memberIssues.forEach(i => {
+        const book = books.find(b => b.id === i.bookId && b.libraryId === libraryId);
+        if (book) {
+          book.availability = 'available';
+        }
+      });
+
+      // Filter out member and their issues
       members = members.filter(m => !(m.id === memberId && m.libraryId === libraryId));
+      issues = issues.filter(i => !(i.memberId === memberId && i.libraryId === libraryId));
+
+      this._setLocal('smart_lib_books', books);
       this._setLocal('smart_lib_members', members);
+      this._setLocal('smart_lib_issues', issues);
       return true;
     }
   }

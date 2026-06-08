@@ -625,11 +625,22 @@ async function handleMemberFormSubmit(e) {
 }
 
 async function deleteMemberRecord(memberId) {
-  if (!confirm("Are you sure you want to remove this student? All their checkout permissions will be revoked.")) return;
-
   try {
-    await window.smartLibDB.deleteMember(currentSession.libraryId, memberId);
-    showToast("Student registration removed.", "success");
+    const libId = currentSession.libraryId;
+    
+    // Fetch all active issues for this library
+    const issues = await window.smartLibDB.getIssues(libId);
+    const activeIssues = issues.filter(i => i.memberId === memberId && i.status === 'issued');
+    
+    let confirmMsg = "Are you sure you want to remove this student? All their checkout history will be permanently deleted.";
+    if (activeIssues.length > 0) {
+      confirmMsg = `WARNING: This student currently has ${activeIssues.length} book(s) checked out and NOT returned!\n\nDeleting this student will automatically release these books (marking them 'available' in the catalog) and permanently delete this member's profile and entire borrowing history.\n\nAre you sure you want to proceed?`;
+    }
+    
+    if (!confirm(confirmMsg)) return;
+
+    await window.smartLibDB.deleteMember(libId, memberId);
+    showToast("Student registration and related records removed.", "success");
     loadAdminMembersTable();
   } catch (err) {
     showToast(err.message, "danger");
