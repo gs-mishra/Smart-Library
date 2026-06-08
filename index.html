@@ -227,11 +227,19 @@
           <!-- Subview 2: Manage Books -->
           <div id="admin-sub-books" class="dash-subview">
             <div class="section-card glass-panel">
-              <div class="section-header">
-                <div class="search-box">
-                  <i class="fa-solid fa-magnifying-glass"></i>
-                  <input type="text" id="book-search-input" class="form-control"
-                    placeholder="Search title, author, genre..." oninput="filterBooksTable()">
+              <div class="section-header" style="gap: 12px;">
+                <div style="display: flex; flex-wrap: wrap; gap: 10px; flex-grow: 1; align-items: center;">
+                  <div class="search-box" style="max-width: 260px; flex-grow: 1;">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <input type="text" id="book-search-input" class="form-control"
+                      placeholder="Search Title or ISBN..." oninput="filterBooksTable()">
+                  </div>
+                  <select id="book-filter-author" class="form-control" style="max-width: 180px; height: 45px;" onchange="filterBooksTable()">
+                    <option value="">All Authors</option>
+                  </select>
+                  <select id="book-filter-genre" class="form-control" style="max-width: 180px; height: 45px;" onchange="filterBooksTable()">
+                    <option value="">All Categories</option>
+                  </select>
                 </div>
                 <button class="btn btn-primary" onclick="openAddBookModal()">
                   <i class="fa-solid fa-plus"></i> Add New Book
@@ -513,9 +521,12 @@
               </div>
 
               <!-- Student QR -->
-              <div class="student-qr-container">
+              <div class="student-qr-container" style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
                 <div id="student-profile-qr-holder"></div>
                 <div class="student-qr-label">Member Scan ID</div>
+                <button type="button" class="btn btn-primary" style="padding: 6px 12px; font-size:11px; width:100%; border-radius:6px; margin-top:6px;" onclick="viewMyIDCard()">
+                  <i class="fa-solid fa-id-card"></i> View ID Card
+                </button>
               </div>
             </div>
 
@@ -548,11 +559,19 @@
           <!-- Student Subview 2: Browse Catalog -->
           <div id="student-sub-browse" class="dash-subview">
             <div class="section-card glass-panel">
-              <div class="section-header">
-                <div class="search-box" style="max-width: 100%">
-                  <i class="fa-solid fa-magnifying-glass"></i>
-                  <input type="text" id="student-book-search" class="form-control"
-                    placeholder="Search titles, authors, or genres in the catalog..." oninput="filterStudentBooks()">
+              <div class="section-header" style="gap: 12px;">
+                <div style="display: flex; flex-wrap: wrap; gap: 10px; flex-grow: 1; align-items: center; width: 100%;">
+                  <div class="search-box" style="max-width: 280px; flex-grow: 1;">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <input type="text" id="student-book-search" class="form-control"
+                      placeholder="Search Title or ISBN..." oninput="filterStudentBooks()">
+                  </div>
+                  <select id="student-filter-author" class="form-control" style="max-width: 200px; height: 45px;" onchange="filterStudentBooks()">
+                    <option value="">All Authors</option>
+                  </select>
+                  <select id="student-filter-genre" class="form-control" style="max-width: 200px; height: 45px;" onchange="filterStudentBooks()">
+                    <option value="">All Categories</option>
+                  </select>
                 </div>
               </div>
 
@@ -735,6 +754,57 @@
             Ensure your webcam permissions are enabled.
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 5: Student ID Card Display -->
+  <div id="modal-idcard" class="modal-overlay" onclick="closeModal('modal-idcard')">
+    <div class="modal-content glass-panel" onclick="event.stopPropagation()" style="max-width: 420px; padding: 25px;">
+      <button class="modal-close" onclick="closeModal('modal-idcard')"><i class="fa-solid fa-xmark"></i></button>
+      <div class="modal-header" style="margin-bottom: 15px;">
+        <h3>Student ID Card</h3>
+      </div>
+      <div class="id-card-print-container" style="display: flex; flex-direction: column; align-items: center; gap: 15px;">
+        
+        <!-- Physical Pass Pass -->
+        <div id="id-card-layout" class="id-card-layout" style="width: 100%; aspect-ratio: 1.586; background: #1e3a8a; border-radius: 12px; color: #ffffff; padding: 16px; display: flex; flex-direction: column; justify-content: space-between; position: relative; overflow: hidden; box-shadow: 0 10px 20px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.1);">
+          <!-- Top Navy Header Banner -->
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 8px; margin-bottom: 8px;">
+            <div style="font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 6px;">
+              <i class="fa-solid fa-graduation-cap" style="color: #60a5fa;"></i> <span id="idcard-lib-name">LIBRARY PASS</span>
+            </div>
+            <div style="font-size: 9px; font-weight: 500; color: #93c5fd; text-transform: uppercase;">MEMBERSHIP CARD</div>
+          </div>
+          <!-- Body Details and QR -->
+          <div style="display: flex; gap: 15px; flex-grow: 1; align-items: center;">
+            <!-- Avatar Icon and Name Details -->
+            <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 4px;">
+              <div id="idcard-student-name" style="font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #ffffff;">Student Name</div>
+              <div style="font-size: 11px; color: #93c5fd; font-family: monospace;">ID: <span id="idcard-student-id" style="color: #ffffff;">Lib2026CEN0001</span></div>
+              <div style="font-size: 11px; color: #cbd5e1;">Username: <span id="idcard-student-username" style="color: #ffffff; font-weight:600;">student123</span></div>
+              <div style="font-size: 10px; color: #cbd5e1; margin-top: 4px;">
+                <div><i class="fa-solid fa-phone" style="font-size:8px; margin-right:4px;"></i><span id="idcard-student-phone">phone</span></div>
+                <div><i class="fa-solid fa-envelope" style="font-size:8px; margin-right:4px;"></i><span id="idcard-student-email">email</span></div>
+              </div>
+            </div>
+            <!-- QR code slot -->
+            <div style="display: flex; flex-direction: column; align-items: center; background: #ffffff; padding: 6px; border-radius: 6px; width: 85px; height: 85px; justify-content: center; flex-shrink: 0;">
+              <div id="idcard-qr-holder"></div>
+            </div>
+          </div>
+          <!-- Footer tag -->
+          <div style="font-size: 8px; text-align: center; color: #93c5fd; margin-top: 6px; border-top: 1px solid rgba(255,255,255,0.15); padding-top: 4px;">
+            Valid at all library branches. Non-transferable.
+          </div>
+        </div>
+
+      </div>
+      <div class="modal-footer" style="margin-top: 20px;">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-idcard')">Close</button>
+        <button type="button" class="btn btn-primary" onclick="downloadMemberIDCard()" style="background: var(--color-secondary);">
+          <i class="fa-solid fa-download"></i> Download Card Image
+        </button>
       </div>
     </div>
   </div>

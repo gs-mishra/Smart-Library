@@ -309,6 +309,7 @@ let cachedBooks = [];
 async function loadAdminBooksTable() {
   try {
     cachedBooks = await window.smartLibDB.getBooks(currentSession.libraryId);
+    populateBookFilterSelects(cachedBooks);
     renderBooksTable(cachedBooks);
   } catch (err) {
     showToast("Error loading books catalog.", "danger");
@@ -360,18 +361,58 @@ function renderBooksTable(books) {
 
 function filterBooksTable() {
   const q = document.getElementById("book-search-input").value.toLowerCase().trim();
-  if (!q) {
-    renderBooksTable(cachedBooks);
-    return;
+  const filterAuthor = document.getElementById("book-filter-author").value;
+  const filterGenre = document.getElementById("book-filter-genre").value;
+  
+  let filtered = cachedBooks;
+  
+  if (q) {
+    filtered = filtered.filter(b => 
+      b.title.toLowerCase().includes(q) || 
+      b.isbn.toLowerCase().includes(q) ||
+      b.id.toLowerCase().includes(q)
+    );
   }
-  const filtered = cachedBooks.filter(b => 
-    b.title.toLowerCase().includes(q) || 
-    b.author.toLowerCase().includes(q) || 
-    b.genre.toLowerCase().includes(q) ||
-    b.isbn.includes(q) ||
-    b.id.includes(q)
-  );
+  
+  if (filterAuthor) {
+    filtered = filtered.filter(b => b.author === filterAuthor);
+  }
+  
+  if (filterGenre) {
+    filtered = filtered.filter(b => b.genre === filterGenre);
+  }
+  
   renderBooksTable(filtered);
+}
+
+function populateBookFilterSelects(books) {
+  const authorSelect = document.getElementById("book-filter-author");
+  const genreSelect = document.getElementById("book-filter-genre");
+  if (!authorSelect || !genreSelect) return;
+  
+  const selectedAuthor = authorSelect.value;
+  const selectedGenre = genreSelect.value;
+  
+  const authors = [...new Set(books.map(b => b.author))].sort();
+  const genres = [...new Set(books.map(b => b.genre))].sort();
+  
+  authorSelect.innerHTML = '<option value="">All Authors</option>';
+  authors.forEach(auth => {
+    const opt = document.createElement("option");
+    opt.value = auth;
+    opt.textContent = auth;
+    if (auth === selectedAuthor) opt.selected = true;
+    authorSelect.appendChild(opt);
+  });
+  
+  genreSelect.innerHTML = '<option value="">All Categories</option>';
+  genres.forEach(g => {
+    const opt = document.createElement("option");
+    opt.value = g;
+    opt.textContent = g;
+    if (g === selectedGenre) opt.selected = true;
+    genreSelect.appendChild(opt);
+  });
 }
 
 // Edit Book Modal triggers
@@ -500,6 +541,7 @@ function renderMembersTable(members, issues = []) {
       </td>
       <td>
         <div style="display:flex; gap: 8px;">
+          <button class="btn btn-secondary btn-icon" onclick="viewStudentIDCard('${m.id}')" title="View ID Card" style="color: var(--color-secondary);"><i class="fa-solid fa-id-card"></i></button>
           <button class="btn btn-secondary btn-icon" onclick="openEditMemberModal('${m.id}')" title="Edit Student"><i class="fa-solid fa-pen"></i></button>
           <button class="btn btn-danger btn-icon" onclick="deleteMemberRecord('${m.id}')" title="Remove Student"><i class="fa-solid fa-trash-can"></i></button>
         </div>
@@ -567,12 +609,16 @@ async function handleMemberFormSubmit(e) {
     if (id) {
       await window.smartLibDB.updateMember(libId, id, data);
       showToast("Student profile updated.", "success");
+      closeModal("modal-member");
+      loadAdminMembersTable();
     } else {
-      await window.smartLibDB.addMember(libId, data);
+      const newMember = await window.smartLibDB.addMember(libId, data);
       showToast("Student registered successfully! They can now log in.", "success");
+      closeModal("modal-member");
+      await loadAdminMembersTable();
+      // Auto open newly generated ID card
+      viewStudentIDCard(newMember.id);
     }
-    closeModal("modal-member");
-    loadAdminMembersTable();
   } catch (err) {
     showToast(err.message, "danger");
   }
@@ -1024,6 +1070,7 @@ let studentCachedBooks = [];
 async function loadStudentBrowseCatalog() {
   try {
     studentCachedBooks = await window.smartLibDB.getBooks(currentSession.libraryId);
+    populateStudentFilterSelects(studentCachedBooks);
     renderStudentBooksGrid(studentCachedBooks);
   } catch (err) {
     showToast("Error loading catalog.", "danger");
@@ -1065,16 +1112,57 @@ function renderStudentBooksGrid(books) {
 
 function filterStudentBooks() {
   const q = document.getElementById("student-book-search").value.toLowerCase().trim();
-  if (!q) {
-    renderStudentBooksGrid(studentCachedBooks);
-    return;
+  const filterAuthor = document.getElementById("student-filter-author").value;
+  const filterGenre = document.getElementById("student-filter-genre").value;
+  
+  let filtered = studentCachedBooks;
+  
+  if (q) {
+    filtered = filtered.filter(b => 
+      b.title.toLowerCase().includes(q) || 
+      b.isbn.toLowerCase().includes(q)
+    );
   }
-  const filtered = studentCachedBooks.filter(b => 
-    b.title.toLowerCase().includes(q) || 
-    b.author.toLowerCase().includes(q) || 
-    b.genre.toLowerCase().includes(q)
-  );
+  
+  if (filterAuthor) {
+    filtered = filtered.filter(b => b.author === filterAuthor);
+  }
+  
+  if (filterGenre) {
+    filtered = filtered.filter(b => b.genre === filterGenre);
+  }
+  
   renderStudentBooksGrid(filtered);
+}
+
+function populateStudentFilterSelects(books) {
+  const authorSelect = document.getElementById("student-filter-author");
+  const genreSelect = document.getElementById("student-filter-genre");
+  if (!authorSelect || !genreSelect) return;
+  
+  const selectedAuthor = authorSelect.value;
+  const selectedGenre = genreSelect.value;
+  
+  const authors = [...new Set(books.map(b => b.author))].sort();
+  const genres = [...new Set(books.map(b => b.genre))].sort();
+  
+  authorSelect.innerHTML = '<option value="">All Authors</option>';
+  authors.forEach(auth => {
+    const opt = document.createElement("option");
+    opt.value = auth;
+    opt.textContent = auth;
+    if (auth === selectedAuthor) opt.selected = true;
+    authorSelect.appendChild(opt);
+  });
+  
+  genreSelect.innerHTML = '<option value="">All Categories</option>';
+  genres.forEach(g => {
+    const opt = document.createElement("option");
+    opt.value = g;
+    opt.textContent = g;
+    if (g === selectedGenre) opt.selected = true;
+    genreSelect.appendChild(opt);
+  });
 }
 
 // STUDENT SUBVIEW 3: BORROW RECORDS
@@ -1286,5 +1374,183 @@ async function handleImageQRUpload(e) {
   } catch (err) {
     showToast(err.message, "danger");
     e.target.value = "";
+  }
+}
+
+// --- MEMBERSHIP ID CARD GENERATION & DOWNLOADS ---
+let activeIDCardMember = null;
+
+function viewStudentIDCard(memberId) {
+  const m = cachedMembers.find(mem => mem.id === memberId);
+  if (!m) return;
+  displayIDCardModal(m);
+}
+
+function viewMyIDCard() {
+  if (!currentSession) return;
+  displayIDCardModal({
+    id: currentSession.id,
+    name: currentSession.name,
+    username: currentSession.username,
+    email: currentSession.email || 'N/A',
+    phone: currentSession.phone || 'N/A',
+    address: currentSession.address || 'N/A',
+    libraryName: currentSession.libraryName
+  });
+}
+
+function displayIDCardModal(member) {
+  activeIDCardMember = member;
+  
+  // Fill text details
+  document.getElementById("idcard-lib-name").textContent = member.libraryName || currentSession.libraryName || "Smart Library";
+  document.getElementById("idcard-student-name").textContent = member.name;
+  document.getElementById("idcard-student-id").textContent = member.id;
+  document.getElementById("idcard-student-username").textContent = member.username;
+  document.getElementById("idcard-student-phone").textContent = member.phone || "N/A";
+  document.getElementById("idcard-student-email").textContent = member.email || "N/A";
+  
+  // Generate QR inside the card
+  const holder = document.getElementById("idcard-qr-holder");
+  const qrValue = `smartlib://member/${member.id}`;
+  window.smartLibQR.generate(holder, qrValue, 75, 75);
+  
+  openModal("modal-idcard");
+}
+
+async function downloadMemberIDCard() {
+  if (!activeIDCardMember) {
+    showToast("No active card selected to download.", "danger");
+    return;
+  }
+  
+  const member = activeIDCardMember;
+  const libName = (member.libraryName || currentSession.libraryName || "Smart Library").toUpperCase();
+  
+  // 1. Create canvas element
+  const canvas = document.createElement("canvas");
+  canvas.width = 380;
+  canvas.height = 240;
+  const ctx = canvas.getContext("2d");
+  
+  // 2. Draw Card Background (Rounded Rectangle styling)
+  ctx.fillStyle = "#1e3a8a"; // Navy base
+  ctx.beginPath();
+  if (ctx.roundRect) {
+    ctx.roundRect(0, 0, canvas.width, canvas.height, 12);
+  } else {
+    ctx.rect(0, 0, canvas.width, canvas.height);
+  }
+  ctx.fill();
+  
+  // Draw subtle overlay gradient
+  const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+  grad.addColorStop(0, "rgba(255, 255, 255, 0.05)");
+  grad.addColorStop(1, "rgba(0, 0, 0, 0.25)");
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  if (ctx.roundRect) {
+    ctx.roundRect(0, 0, canvas.width, canvas.height, 12);
+  } else {
+    ctx.rect(0, 0, canvas.width, canvas.height);
+  }
+  ctx.fill();
+
+  // Draw border line
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  if (ctx.roundRect) {
+    ctx.roundRect(0, 0, canvas.width, canvas.height, 12);
+  } else {
+    ctx.rect(0, 0, canvas.width, canvas.height);
+  }
+  ctx.stroke();
+
+  // 3. Draw Header Section
+  ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
+  ctx.fillRect(0, 0, canvas.width, 45); // Banner bg
+  
+  ctx.fillStyle = "rgba(255, 255, 255, 0.15)";
+  ctx.fillRect(0, 44, canvas.width, 1); // Border bottom
+  
+  // Library Title
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 13px 'Outfit', sans-serif";
+  ctx.fillText(libName, 18, 26);
+  
+  // Badge Title
+  ctx.fillStyle = "#93c5fd";
+  ctx.font = "600 9px 'Outfit', sans-serif";
+  ctx.textAlign = "right";
+  ctx.fillText("MEMBERSHIP PASS", canvas.width - 18, 26);
+  ctx.textAlign = "left"; // reset
+
+  // 4. Draw Student Avatar placeholder
+  ctx.fillStyle = "#60a5fa";
+  ctx.beginPath();
+  ctx.arc(40, 100, 22, 0, Math.PI * 2);
+  ctx.fill();
+  
+  ctx.fillStyle = "#1e3a8a";
+  ctx.beginPath();
+  ctx.arc(40, 95, 8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(40, 118, 14, Math.PI, 0, false);
+  ctx.fill();
+
+  // 5. Draw Student details
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 16px 'Outfit', sans-serif";
+  ctx.fillText(member.name, 80, 85);
+  
+  ctx.fillStyle = "#93c5fd";
+  ctx.font = "normal 11px monospace";
+  ctx.fillText(`ID: ${member.id}`, 80, 104);
+  
+  ctx.fillStyle = "#e2e8f0";
+  ctx.font = "500 11px 'Outfit', sans-serif";
+  ctx.fillText(`Username: ${member.username}`, 80, 122);
+  
+  ctx.fillStyle = "#cbd5e1";
+  ctx.font = "normal 10px 'Outfit', sans-serif";
+  ctx.fillText(`Phone: ${member.phone || 'N/A'}`, 80, 140);
+  ctx.fillText(`Email: ${member.email || 'N/A'}`, 80, 155);
+
+  // 6. Draw QR Code representation
+  const qrDiv = document.getElementById("idcard-qr-holder");
+  const qrImg = qrDiv.querySelector("img") || qrDiv.querySelector("canvas");
+  
+  if (qrImg) {
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    if (ctx.roundRect) {
+      ctx.roundRect(canvas.width - 98, 65, 80, 80, 6);
+    } else {
+      ctx.rect(canvas.width - 98, 65, 80, 80);
+    }
+    ctx.fill();
+    ctx.drawImage(qrImg, canvas.width - 94, 69, 72, 72);
+  }
+
+  // 7. Footer Text
+  ctx.fillStyle = "#93c5fd";
+  ctx.font = "normal 8px 'Outfit', sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("Valid at all library branches. Non-transferable.", canvas.width / 2, 222);
+
+  // 8. Convert to download link
+  try {
+    const link = document.createElement("a");
+    link.href = canvas.toDataURL("image/png");
+    link.download = `smartlib_pass_${member.username}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast("Library ID Card downloaded successfully!", "success");
+  } catch (err) {
+    console.error("Canvas export failed:", err);
+    showToast("Failed to export ID Card image.", "danger");
   }
 }
