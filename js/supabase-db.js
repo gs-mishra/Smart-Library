@@ -66,7 +66,8 @@ class SupabaseLibraryDB {
         .from(bucketName)
         .upload(filePath, file, {
           cacheControl: '3600',
-          upsert: true
+          upsert: true,
+          contentType: file.type
         });
       if (error) throw error;
 
