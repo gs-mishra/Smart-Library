@@ -339,6 +339,7 @@ function enterAdminDashboard() {
 }
 
 function switchDashboardTab(subviewId, element) {
+  closeSidebar();
   // Toggle subviews
   document.querySelectorAll("#admin-view .dash-subview").forEach(v => v.classList.remove("active"));
   document.getElementById(subviewId).classList.add("active");
@@ -1295,6 +1296,7 @@ function enterStudentDashboard() {
 }
 
 function switchStudentTab(subviewId, element) {
+  closeSidebar();
   document.querySelectorAll("#student-view .dash-subview").forEach(v => v.classList.remove("active"));
   document.getElementById(subviewId).classList.add("active");
 
@@ -1932,5 +1934,26 @@ function openAddBookModalFromShelfFinder() {
   if (barcodeValue) {
     document.getElementById("book-barcode").value = barcodeValue;
     fetchBookDetailsFromOpenLibrary(barcodeValue);
+  }
+}
+
+// ==========================================
+// MOBILE SIDEBAR HANDLERS
+// ==========================================
+function toggleSidebar() {
+  const sidebar = document.querySelector(".app-view.active .sidebar");
+  const backdrop = document.getElementById("sidebar-backdrop");
+  if (sidebar && backdrop) {
+    sidebar.classList.toggle("open");
+    backdrop.classList.toggle("active");
+  }
+}
+
+function closeSidebar() {
+  const sidebar = document.querySelector(".app-view.active .sidebar");
+  const backdrop = document.getElementById("sidebar-backdrop");
+  if (sidebar && backdrop) {
+    sidebar.classList.remove("open");
+    backdrop.classList.remove("active");
   }
 }
