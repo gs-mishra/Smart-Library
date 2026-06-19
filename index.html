@@ -92,23 +92,24 @@
               placeholder="e.g., Central University Library" required>
           </div>
           <div class="form-group">
-            <label for="register-lib-code">Library Short Code (Max 5 chars)</label>
-            <input type="text" id="register-lib-code" class="form-control" placeholder="e.g., CEN" maxlength="5"
-              required style="text-transform: uppercase;">
+            <label for="register-lib-code">Library Code (Exactly 4 digits)</label>
+            <input type="text" id="register-lib-code" class="form-control" placeholder="e.g., 1234" maxlength="4"
+              pattern="^[0-9]{4}$" title="Must be exactly 4 digits (0-9)" required>
           </div>
-
+          <div class="form-group">
+            <label for="register-lib-image">Library Profile Image</label>
+            <input type="file" id="register-lib-image" class="form-control" accept="image/*">
+          </div>
           <div class="form-group">
             <label for="register-admin-user">Admin Username</label>
             <input type="text" id="register-admin-user" class="form-control" placeholder="Create username" required
               autocomplete="username">
           </div>
-
           <div class="form-group">
             <label for="register-admin-password">Admin Password</label>
             <input type="password" id="register-admin-password" class="form-control"
               placeholder="Create strong password" required autocomplete="new-password">
           </div>
-
           <button type="submit" class="btn btn-success" style="width: 100%; margin-top: 10px;">
             <i class="fa-solid fa-plus"></i> Initialize Library
           </button>
@@ -322,45 +323,68 @@
 
           <!-- Subview 4: Issue / Return Desk -->
           <div id="admin-sub-desk" class="dash-subview">
-            <div class="checkout-panel-grid">
+            <div class="checkout-panel-grid" style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 30px; align-items: start;">
 
-              <!-- Form Panel -->
+              <!-- Sequential Workspace Panel -->
               <div class="section-card glass-panel" style="margin-bottom: 0;">
                 <div class="section-header">
                   <div class="section-title">
                     <i class="fa-solid fa-shuffle"></i>
-                    <h3>Checkout / Return Operations</h3>
+                    <h3>Sequential Desk Operations</h3>
                   </div>
                 </div>
 
-                <form id="form-desk-operation" onsubmit="handleDeskOperationSubmit(event)">
-                  <div class="form-group" style="position: relative;">
-                    <label for="desk-member-input">1. Student / Member ID</label>
+                <!-- Mode Toggles -->
+                <div class="form-toggle-label" style="margin-bottom: 25px;">
+                  <div id="desk-role-issue" class="form-toggle-btn active" onclick="setDeskMode('issue')">
+                    <i class="fa-solid fa-book-medical"></i> Issue Book Mode
+                  </div>
+                  <div id="desk-role-return" class="form-toggle-btn" onclick="setDeskMode('return')">
+                    <i class="fa-solid fa-book-bookmark"></i> Return Book Mode
+                  </div>
+                </div>
+
+                <!-- Workflow Step 1: Scan Member -->
+                <div id="desk-step-member-container" class="glass-panel" style="padding: 20px; margin-bottom: 20px; border-left: 4px solid var(--color-primary);">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h4 style="font-size: 15px; text-transform: uppercase; color: var(--color-primary);">Step 1: Scan Student QR</h4>
+                    <span id="desk-step-member-badge" class="badge badge-danger">Awaiting Scan</span>
+                  </div>
+                  <div class="form-group" style="position: relative; margin-bottom: 0;">
                     <div style="display: flex; gap: 10px;">
                       <input type="text" id="desk-member-input" class="form-control"
-                        placeholder="Enter Member ID or scan QR code" required
+                        placeholder="Enter Member ID/Username or Scan QR" required
                         onkeyup="showDeskMemberSuggestions(this.value)">
-                      <button type="button" class="btn btn-secondary" onclick="openScannerFor('member')">
-                        <i class="fa-solid fa-camera"></i> Scan Member QR
+                      <button type="button" class="btn btn-primary" onclick="openScannerFor('member')">
+                        <i class="fa-solid fa-camera"></i> Scan QR
                       </button>
                     </div>
                     <div id="desk-member-suggestions" class="suggestions-dropdown"></div>
                   </div>
+                </div>
 
-                  <div class="form-group" style="position: relative;">
-                    <label for="desk-book-input">2. Book ID</label>
+                <!-- Workflow Step 2: Scan Book Barcode -->
+                <div id="desk-step-book-container" class="glass-panel" style="padding: 20px; margin-bottom: 20px; border-left: 4px solid var(--text-muted); opacity: 0.6; pointer-events: none;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h4 style="font-size: 15px; text-transform: uppercase; color: var(--text-muted);">Step 2: Scan Book Barcode</h4>
+                    <span id="desk-step-book-badge" class="badge badge-danger">Locked</span>
+                  </div>
+                  <div class="form-group" style="position: relative; margin-bottom: 0;">
                     <div style="display: flex; gap: 10px;">
                       <input type="text" id="desk-book-input" class="form-control"
-                        placeholder="Enter Book ID or scan QR code" required
+                        placeholder="Enter Book Barcode/ID or Scan" required
                         onkeyup="showDeskBookSuggestions(this.value)">
                       <button type="button" class="btn btn-secondary" onclick="openScannerFor('book')">
-                        <i class="fa-solid fa-camera"></i> Scan Book QR
+                        <i class="fa-solid fa-camera"></i> Scan Barcode
                       </button>
                     </div>
                     <div id="desk-book-suggestions" class="suggestions-dropdown"></div>
                   </div>
+                </div>
 
-                  <div class="form-group">
+                <!-- Loan details and Action -->
+                <div id="desk-action-container" style="display: none; animation: fadeIn 0.3s ease;">
+                  <div class="form-group" id="desk-loan-period-group">
                     <label for="desk-days-input">Loan Period (Days)</label>
                     <select id="desk-days-input" class="form-control">
                       <option value="7">7 Days (Short Loan)</option>
@@ -368,50 +392,95 @@
                       <option value="30">30 Days (Extended Loan)</option>
                     </select>
                   </div>
-
-                  <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 10px; height: 45px;">
-                    <i class="fa-solid fa-circle-check"></i> Process Checkout Issue
+                  <button type="button" id="desk-submit-btn" class="btn btn-success" style="width: 100%; height: 48px; font-size: 15px;" onclick="executeSequentialDeskOperation()">
+                    <i class="fa-solid fa-circle-check"></i> Complete Transaction
                   </button>
-                </form>
-
-                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed var(--border-color);">
-                  <button type="button" class="btn btn-success"
-                    style="width: 100%; height: 45px; background: var(--color-secondary);"
-                    onclick="openScannerFor('return')">
-                    <i class="fa-solid fa-qrcode"></i> Quick Return (Scan Book QR)
+                  <button type="button" class="btn btn-secondary" style="width: 100%; margin-top: 10px;" onclick="resetDeskWorkflow()">
+                    <i class="fa-solid fa-rotate-left"></i> Reset Scan Process
                   </button>
                 </div>
 
-                <!-- Simulated Scanning for systems without webcams -->
+                <!-- Simulated Scanning Helper -->
                 <div class="mock-scanner-helper" style="margin-top: 25px;">
-                  <p><i class="fa-solid fa-lightbulb"></i> <strong>Offline Simulator:</strong> Click a quick-code tag to
-                    instantly fill details and simulate scanning a physical QR code.</p>
+                  <p><i class="fa-solid fa-lightbulb"></i> <strong>Offline Simulator:</strong> Click a quick-code tag to simulate scanning a physical code.</p>
                   <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 10px;">
-                    <div>
-                      <span style="font-size:12px; color: var(--text-secondary);">Simulate Book QR:</span>
-                      <div id="mock-books-list" class="mock-qr-list"></div>
-                    </div>
                     <div>
                       <span style="font-size:12px; color: var(--text-secondary);">Simulate Student QR:</span>
                       <div id="mock-members-list" class="mock-qr-list"></div>
+                    </div>
+                    <div>
+                      <span style="font-size:12px; color: var(--text-secondary);">Simulate Book Barcode:</span>
+                      <div id="mock-books-list" class="mock-qr-list"></div>
                     </div>
                   </div>
                 </div>
               </div>
 
-              <!-- Active Checkouts Summary Panel -->
-              <div class="section-card glass-panel" style="margin-bottom: 0;">
-                <div class="section-header">
-                  <div class="section-title">
-                    <i class="fa-solid fa-receipt"></i>
-                    <h3>Active Checkouts Desk</h3>
+              <!-- Interactive Display & Active Checkouts Panel -->
+              <div style="display: flex; flex-direction: column; gap: 20px;">
+                
+                <!-- Scanned Entities Preview Cards -->
+                <div class="section-card glass-panel" style="margin-bottom: 0; padding: 20px;">
+                  <div class="section-title" style="margin-bottom: 15px;">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <h3>Scanned Profiles Review</h3>
+                  </div>
+                  
+                  <div style="display: flex; flex-direction: column; gap: 15px;">
+                    <!-- Student Card Preview -->
+                    <div id="preview-student-card" class="glass-panel" style="padding: 15px; display: none; background: rgba(var(--color-primary-rgb), 0.03); border: 1px dashed var(--color-primary);">
+                      <div style="display: flex; gap: 15px; align-items: center;">
+                        <div class="profile-avatar" style="background: var(--color-primary); width: 45px; height: 45px; flex-shrink: 0;"><i class="fa-solid fa-user-graduate"></i></div>
+                        <div style="overflow: hidden; flex-grow: 1;">
+                          <h4 id="preview-student-name" style="font-size: 15px; margin-bottom: 2px;">Name</h4>
+                          <div id="preview-student-id" style="font-size: 12px; color: var(--text-secondary); font-family: monospace;">ID: </div>
+                          <div style="display: flex; gap: 15px; margin-top: 6px; font-size: 11px;">
+                            <span>Active Issues: <strong id="preview-student-issues" style="color: var(--color-info);">0</strong></span>
+                            <span>Unpaid Fines: <strong id="preview-student-fines" style="color: var(--color-accent);">₹0.00</strong></span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <!-- Book Card Preview -->
+                    <div id="preview-book-card" class="glass-panel" style="padding: 15px; display: none; background: rgba(5, 150, 105, 0.03); border: 1px dashed var(--color-secondary);">
+                      <div style="display: flex; gap: 15px; align-items: center;">
+                        <div id="preview-book-cover-container" style="width: 45px; height: 60px; background: #e2e8f0; border-radius: 4px; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0;">
+                          <i class="fa-solid fa-book" style="color: var(--text-muted);"></i>
+                        </div>
+                        <div style="overflow: hidden; flex-grow: 1;">
+                          <h4 id="preview-book-title" style="font-size: 15px; margin-bottom: 2px;">Title</h4>
+                          <div id="preview-book-author" style="font-size: 12px; color: var(--text-secondary);">by Author</div>
+                          <div style="display: flex; gap: 15px; margin-top: 6px; font-size: 11px;">
+                            <span>Barcode: <strong id="preview-book-barcode" style="font-family: monospace;">Barcode</strong></span>
+                            <span>Available: <strong id="preview-book-available" style="color: var(--color-secondary);">0</strong></span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <!-- Placeholder when nothing is scanned -->
+                    <div id="preview-desk-placeholder" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+                      <i class="fa-solid fa-qrcode" style="font-size: 32px; margin-bottom: 12px; opacity: 0.5;"></i>
+                      <p style="font-size: 13px;">Scan member QR to initiate transaction.</p>
+                    </div>
                   </div>
                 </div>
 
-                <div id="desk-checkout-list"
-                  style="display: flex; flex-direction: column; gap: 16px; max-height: 480px; overflow-y: auto;">
-                  <!-- Loaded via JS -->
+                <!-- Active Checkouts Summary Panel -->
+                <div class="section-card glass-panel" style="margin-bottom: 0; padding: 20px;">
+                  <div class="section-header" style="margin-bottom: 15px;">
+                    <div class="section-title">
+                      <i class="fa-solid fa-receipt"></i>
+                      <h3>Active Checkouts Desk</h3>
+                    </div>
+                  </div>
+                  <div id="desk-checkout-list"
+                    style="display: flex; flex-direction: column; gap: 12px; max-height: 280px; overflow-y: auto;">
+                    <!-- Loaded via JS -->
+                  </div>
                 </div>
+
               </div>
 
             </div>
@@ -531,7 +600,7 @@
                 </p>
                 <p id="student-display-email" style="margin-top: 4px;"><i class="fa-solid fa-envelope"
                     style="margin-right: 6px;"></i> student@email.com</p>
-                <p id="student-display-phone" style="margin-top: 4px;"><i class="fa-solid fa-phone"
+                <p id="student-display-mobile" style="margin-top: 4px;"><i class="fa-solid fa-mobile-screen-button"
                     style="margin-right: 6px;"></i> Mobile: <span>-</span></p>
                 <p id="student-display-address" style="margin-top: 4px;"><i class="fa-solid fa-location-dot"
                     style="margin-right: 6px;"></i> Address: <span>-</span></p>
@@ -656,6 +725,15 @@
       <form id="form-book-submit" onsubmit="handleBookFormSubmit(event)">
         <input type="hidden" id="modal-book-id">
         <div class="form-group">
+          <label for="book-barcode">Barcode (Scan or Enter Code)</label>
+          <div style="display: flex; gap: 10px;">
+            <input type="text" id="book-barcode" class="form-control" placeholder="Scan barcode or enter unique identifier" required>
+            <button type="button" class="btn btn-secondary" onclick="openScannerFor('add-book-barcode')">
+              <i class="fa-solid fa-camera"></i> Scan Barcode
+            </button>
+          </div>
+        </div>
+        <div class="form-group">
           <label for="book-title">Book Title</label>
           <input type="text" id="book-title" class="form-control" placeholder="e.g., The Great Gatsby" required>
         </div>
@@ -664,13 +742,12 @@
           <input type="text" id="book-author" class="form-control" placeholder="e.g., F. Scott Fitzgerald" required>
         </div>
         <div class="form-group">
-          <label for="book-genre">Genre / Category</label>
-          <input type="text" id="book-genre" class="form-control" placeholder="e.g., Fiction, Science Fiction, History"
-            required>
-        </div>
-        <div class="form-group">
           <label for="book-isbn">ISBN Code</label>
           <input type="text" id="book-isbn" class="form-control" placeholder="e.g., 978-3-16-148410-0" required>
+        </div>
+        <div class="form-group">
+          <label for="book-cover">Book Cover Image</label>
+          <input type="file" id="book-cover" class="form-control" accept="image/*">
         </div>
         <div style="display: flex; gap: 15px;">
           <div class="form-group" style="flex: 1;">
@@ -714,8 +791,9 @@
             autocomplete="email">
         </div>
         <div class="form-group">
-          <label for="member-phone">Mobile Number</label>
-          <input type="tel" id="member-phone" class="form-control" placeholder="e.g., phone no." required>
+          <label for="member-mobile">Mobile Number (10 Digits)</label>
+          <input type="tel" id="member-mobile" class="form-control" placeholder="e.g., 9876543210" maxlength="10"
+            pattern="^[0-9]{10}$" title="Must be exactly 10 digits (0-9)" required>
         </div>
         <div class="form-group">
           <label for="member-address">Home Address</label>
@@ -818,8 +896,8 @@
               <div style="font-size: 11px; color: #cbd5e1;">Username: <span id="idcard-student-username"
                   style="color: #ffffff; font-weight:600;">student123</span></div>
               <div style="font-size: 10px; color: #cbd5e1; margin-top: 4px;">
-                <div><i class="fa-solid fa-phone" style="font-size:8px; margin-right:4px;"></i><span
-                    id="idcard-student-phone">phone</span></div>
+                <div><i class="fa-solid fa-mobile-screen-button" style="font-size:8px; margin-right:4px;"></i><span
+                    id="idcard-student-mobile">phone</span></div>
                 <div><i class="fa-solid fa-envelope" style="font-size:8px; margin-right:4px;"></i><span
                     id="idcard-student-email">email</span></div>
               </div>

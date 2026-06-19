@@ -3,8 +3,8 @@
 // If values are empty or default templates, database calls gracefully fallback to LocalStorage.
 
 const supabaseConfig = {
-  url: "https://ufnkdbmqctdkyjozevzw.supabase.co",
-  anonKey: "sb_publishable_0ImDwpkpqqeRhJcLwnN-aw_eYMLW5jm"
+  url: "https://ksarwkaseogpljtcjusq.supabase.co",
+  anonKey: "sb_publishable_eFD7Vdl0yfidyDHWRvZyPg_FTh7XeCO"
 };
 
 // Check if Supabase is configured (i.e. user has replaced url/key)

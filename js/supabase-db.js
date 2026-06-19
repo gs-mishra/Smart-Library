@@ -2,6 +2,17 @@
 // Supabase Database Wrapper for Smart Library
 // Implements client CRUD and transparently falls back to LocalStorage when Supabase config is default.
 
+// Helper function to hash passwords client-side using browser-native SHA-256
+async function hashPassword(password) {
+  if (!password) return "";
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  return hashHex;
+}
+
 class SupabaseLibraryDB {
   constructor() {
     this.isSupabase = false;
@@ -41,6 +52,32 @@ class SupabaseLibraryDB {
       if (!localStorage.getItem('smart_lib_issues')) {
         localStorage.setItem('smart_lib_issues', JSON.stringify([]));
       }
+      if (!localStorage.getItem('smart_lib_settings')) {
+        localStorage.setItem('smart_lib_settings', JSON.stringify([]));
+      }
+    }
+  }
+
+  // --- HELPER STORAGE UPLOAD OPERATION ---
+  async uploadFile(bucketName, filePath, file) {
+    if (!this.isSupabase) return null;
+    try {
+      const { data, error } = await this.client.storage
+        .from(bucketName)
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true
+        });
+      if (error) throw error;
+
+      const { data: { publicUrl } } = this.client.storage
+        .from(bucketName)
+        .getPublicUrl(filePath);
+
+      return publicUrl;
+    } catch (err) {
+      console.error(`Error uploading to bucket ${bucketName}:`, err);
+      throw new Error(`Failed to upload image to bucket ${bucketName}: ${err.message}`);
     }
   }
 
@@ -60,7 +97,10 @@ class SupabaseLibraryDB {
   // --- LIBRARIES ---
   async getLibraries() {
     if (this.isSupabase) {
-      const { data, error } = await this.client.from('libraries').select('*');
+      const { data, error } = await this.client
+        .from('libraries')
+        .select('*')
+        .order('name');
       if (error) {
         console.error("Supabase getLibraries error:", error);
         throw error;
@@ -68,9 +108,10 @@ class SupabaseLibraryDB {
       return data.map(l => ({
         id: l.id,
         name: l.name,
-        adminUser: l.admin_user,
+        adminUsername: l.admin_username,
         adminPassword: l.admin_password,
-        code: l.code || '',
+        imageUrl: l.image_url,
+        libraryCode: l.library_code,
         createdAt: l.created_at
       }));
     } else {
@@ -78,29 +119,54 @@ class SupabaseLibraryDB {
     }
   }
 
-  async registerLibrary(name, adminUser, adminPassword, code) {
-    const usernameClean = adminUser.trim().toLowerCase();
-    const codeClean = code ? code.trim().toUpperCase() : name.slice(0, 3).toUpperCase();
-    
+  async registerLibrary(name, adminUsername, adminPassword, libraryCode, imageFile = null) {
+    const usernameClean = adminUsername.trim().toLowerCase();
+    const codeClean = libraryCode.trim();
+
+    if (!/^[0-9]{4}$/.test(codeClean)) {
+      throw new Error("Library Code must be exactly 4 digits.");
+    }
+
+    const hashedPassword = await hashPassword(adminPassword);
+
     if (this.isSupabase) {
       // Check duplicate admin username
-      const { data: existing, error: queryErr } = await this.client
+      const { data: existingUser } = await this.client
         .from('libraries')
         .select('id')
-        .eq('admin_user', usernameClean);
-      
-      if (queryErr) throw queryErr;
-      if (existing && existing.length > 0) {
+        .eq('admin_username', usernameClean)
+        .maybeSingle();
+
+      if (existingUser) {
         throw new Error("Admin username already taken.");
       }
 
-      const id = 'lib_' + Math.random().toString(36).substr(2, 9);
+      // Check duplicate library code
+      const { data: existingCode } = await this.client
+        .from('libraries')
+        .select('id')
+        .eq('library_code', codeClean)
+        .maybeSingle();
+
+      if (existingCode) {
+        throw new Error("Library code already registered.");
+      }
+
+      // 1. Upload Library Image if provided
+      let imageUrl = null;
+      if (imageFile) {
+        const fileExt = imageFile.name.split('.').pop();
+        const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 5)}.${fileExt}`;
+        imageUrl = await this.uploadFile('library_images', fileName, imageFile);
+      }
+
+      // 2. Insert Library Row
       const newLibRow = {
-        id: id,
-        name: name,
-        admin_user: usernameClean,
-        admin_password: adminPassword,
-        code: codeClean
+        name: name.trim(),
+        admin_username: usernameClean,
+        admin_password: hashedPassword,
+        library_code: codeClean,
+        image_url: imageUrl
       };
 
       const { data, error } = await this.client
@@ -108,32 +174,67 @@ class SupabaseLibraryDB {
         .insert(newLibRow)
         .select()
         .single();
-      
+
       if (error) throw error;
-      
+
+      // 3. Initialize Default Settings for this library
+      const defaultSettings = {
+        library_id: data.id,
+        fine_per_day: 1.0,
+        due_days_limit: 14
+      };
+      await this.client.from('settings').insert(defaultSettings);
+
       return {
         id: data.id,
         name: data.name,
-        adminUser: data.admin_user,
+        adminUsername: data.admin_username,
         adminPassword: data.admin_password,
-        code: data.code,
+        imageUrl: data.image_url,
+        libraryCode: data.library_code,
         createdAt: data.created_at
       };
     } else {
+      // LocalStorage Mode
       const libs = this._getLocal('smart_lib_libraries');
-      if (libs.some(l => l.adminUser === usernameClean)) {
+      if (libs.some(l => l.adminUsername === usernameClean)) {
         throw new Error("Admin username already taken.");
       }
+      if (libs.some(l => l.libraryCode === codeClean)) {
+        throw new Error("Library code already registered.");
+      }
+
+      let imageUrl = null;
+      if (imageFile) {
+        // Convert to base64 for localstorage mockup
+        imageUrl = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result);
+          reader.readAsDataURL(imageFile);
+        });
+      }
+
       const newLib = {
         id: 'lib_' + Math.random().toString(36).substr(2, 9),
-        name: name,
-        adminUser: usernameClean,
-        adminPassword: adminPassword,
-        code: codeClean,
+        name: name.trim(),
+        adminUsername: usernameClean,
+        adminPassword: hashedPassword,
+        libraryCode: codeClean,
+        imageUrl: imageUrl,
         createdAt: new Date().toISOString()
       };
       libs.push(newLib);
       this._setLocal('smart_lib_libraries', libs);
+
+      // Create LocalStorage Settings
+      const settingsList = this._getLocal('smart_lib_settings');
+      settingsList.push({
+        library_id: newLib.id,
+        fine_per_day: 1.0,
+        due_days_limit: 14
+      });
+      this._setLocal('smart_lib_settings', settingsList);
+
       return newLib;
     }
   }
@@ -141,6 +242,7 @@ class SupabaseLibraryDB {
   // --- LOGIN ---
   async loginUser(libraryId, username, password, role) {
     const usernameClean = username.trim().toLowerCase();
+    const hashedPassword = await hashPassword(password);
 
     if (this.isSupabase) {
       if (role === 'admin') {
@@ -148,17 +250,19 @@ class SupabaseLibraryDB {
           .from('libraries')
           .select('*')
           .eq('id', libraryId)
-          .single();
-        
+          .maybeSingle();
+
         if (error || !data) throw new Error("Library or admin account not found.");
-        
-        if (data.admin_user === usernameClean && data.admin_password === password) {
+
+        if (data.admin_username === usernameClean && data.admin_password === hashedPassword) {
           return {
             id: data.id,
             libraryId: data.id,
             libraryName: data.name,
-            username: data.admin_user,
+            username: data.admin_username,
             name: "Librarian Admin",
+            imageUrl: data.image_url,
+            libraryCode: data.library_code,
             role: "admin"
           };
         } else {
@@ -171,15 +275,15 @@ class SupabaseLibraryDB {
           .select('*')
           .eq('library_id', libraryId)
           .eq('username', usernameClean)
-          .single();
-        
+          .maybeSingle();
+
         if (error || !data) throw new Error("Student account not found.");
 
-        if (data.password === password) {
-          // Fetch Library name
+        if (data.password === hashedPassword) {
+          // Fetch Library details
           const { data: libData } = await this.client
             .from('libraries')
-            .select('name')
+            .select('name, library_code')
             .eq('id', libraryId)
             .single();
 
@@ -187,8 +291,15 @@ class SupabaseLibraryDB {
             id: data.id,
             libraryId: libraryId,
             libraryName: libData ? libData.name : "Library",
+            libraryCode: libData ? libData.library_code : "CEN",
+            memberIdCustom: data.member_id_custom,
             username: data.username,
             name: data.name,
+            email: data.email,
+            mobile: data.mobile,
+            address: data.address,
+            qrCodeUrl: data.qr_code_url,
+            joinDate: data.join_date,
             role: "student"
           };
         } else {
@@ -202,13 +313,15 @@ class SupabaseLibraryDB {
       if (!lib) throw new Error("Library not found.");
 
       if (role === 'admin') {
-        if (lib.adminUser === usernameClean && lib.adminPassword === password) {
+        if (lib.adminUsername === usernameClean && lib.adminPassword === hashedPassword) {
           return {
             id: lib.id,
             libraryId: lib.id,
             libraryName: lib.name,
-            username: lib.adminUser,
+            username: lib.adminUsername,
             name: "Librarian Admin",
+            imageUrl: lib.imageUrl,
+            libraryCode: lib.libraryCode,
             role: "admin"
           };
         } else {
@@ -218,13 +331,20 @@ class SupabaseLibraryDB {
         const members = this._getLocal('smart_lib_members');
         const member = members.find(m => m.libraryId === libraryId && m.username === usernameClean);
         if (!member) throw new Error("Student account not found.");
-        if (member.password === password) {
+        if (member.password === hashedPassword) {
           return {
             id: member.id,
             libraryId: libraryId,
             libraryName: lib.name,
+            libraryCode: lib.libraryCode,
+            memberIdCustom: member.memberIdCustom,
             username: member.username,
             name: member.name,
+            email: member.email,
+            mobile: member.mobile,
+            address: member.address,
+            qrCodeUrl: member.qrCodeUrl,
+            joinDate: member.joinDate,
             role: "student"
           };
         } else {
@@ -234,26 +354,94 @@ class SupabaseLibraryDB {
     }
   }
 
+  // --- SYSTEM SETTINGS ---
+  async getSettings(libraryId) {
+    if (this.isSupabase) {
+      const { data, error } = await this.client
+        .from('settings')
+        .select('*')
+        .eq('library_id', libraryId)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) {
+        // Create if missing
+        const defaultSettings = { library_id: libraryId, fine_per_day: 1.0, due_days_limit: 14 };
+        await this.client.from('settings').insert(defaultSettings);
+        return {
+          finePerDay: 1.0,
+          dueDaysLimit: 14
+        };
+      }
+      return {
+        finePerDay: parseFloat(data.fine_per_day),
+        dueDaysLimit: parseInt(data.due_days_limit)
+      };
+    } else {
+      const settingsList = this._getLocal('smart_lib_settings');
+      let item = settingsList.find(s => s.library_id === libraryId);
+      if (!item) {
+        item = { library_id: libraryId, fine_per_day: 1.0, due_days_limit: 14 };
+        settingsList.push(item);
+        this._setLocal('smart_lib_settings', settingsList);
+      }
+      return {
+        finePerDay: item.fine_per_day,
+        dueDaysLimit: item.due_days_limit
+      };
+    }
+  }
+
+  async updateSettings(libraryId, finePerDay, dueDaysLimit) {
+    const fineRate = parseFloat(finePerDay);
+    const dayLimit = parseInt(dueDaysLimit);
+
+    if (this.isSupabase) {
+      const { error } = await this.client
+        .from('settings')
+        .upsert({
+          library_id: libraryId,
+          fine_per_day: fineRate,
+          due_days_limit: dayLimit
+        });
+      if (error) throw error;
+      return true;
+    } else {
+      const settingsList = this._getLocal('smart_lib_settings');
+      const idx = settingsList.findIndex(s => s.library_id === libraryId);
+      if (idx !== -1) {
+        settingsList[idx].fine_per_day = fineRate;
+        settingsList[idx].due_days_limit = dayLimit;
+      } else {
+        settingsList.push({ library_id: libraryId, fine_per_day: fineRate, due_days_limit: dayLimit });
+      }
+      this._setLocal('smart_lib_settings', settingsList);
+      return true;
+    }
+  }
+
   // --- BOOKS ---
   async getBooks(libraryId) {
     if (this.isSupabase) {
       const { data, error } = await this.client
         .from('books')
         .select('*')
-        .eq('library_id', libraryId);
-      
+        .eq('library_id', libraryId)
+        .order('title');
+
       if (error) throw error;
-      
+
       return data.map(b => ({
         id: b.id,
         libraryId: b.library_id,
         title: b.title,
-        author: b.author,
-        genre: b.genre,
-        isbn: b.isbn,
-        copyCount: parseInt(b.copy_count || 1),
+        author: b.author || 'N/A',
+        isbn: b.isbn || 'N/A',
+        barcode: b.barcode || 'N/A',
+        coverUrl: b.cover_url,
         shelfLocation: b.shelf_location || 'N/A',
-        availability: b.availability,
+        totalCopies: parseInt(b.total_copies || 1),
+        availableCopies: parseInt(b.available_copies || 1),
         createdAt: b.created_at
       }));
     } else {
@@ -262,53 +450,95 @@ class SupabaseLibraryDB {
     }
   }
 
-  async addBook(libraryId, bookData) {
-    const id = 'book_' + Math.random().toString(36).substr(2, 9);
-    const bookRow = {
-      id: id,
-      library_id: libraryId,
-      title: bookData.title.trim(),
-      author: bookData.author.trim(),
-      genre: bookData.genre.trim(),
-      isbn: bookData.isbn.trim(),
-      copy_count: parseInt(bookData.copyCount || 1),
-      shelf_location: bookData.shelfLocation ? bookData.shelfLocation.trim() : 'N/A',
-      availability: bookData.availability || 'available'
-    };
+  async addBook(libraryId, bookData, coverFile = null) {
+    const barcodeClean = bookData.barcode ? bookData.barcode.trim() : null;
 
     if (this.isSupabase) {
+      // Check unique barcode in this library
+      if (barcodeClean) {
+        const { data: existing } = await this.client
+          .from('books')
+          .select('id')
+          .eq('library_id', libraryId)
+          .eq('barcode', barcodeClean)
+          .maybeSingle();
+
+        if (existing) {
+          throw new Error("A book with this Barcode is already registered.");
+        }
+      }
+
+      // Upload Cover file if provided
+      let coverUrl = null;
+      if (coverFile) {
+        const fileExt = coverFile.name.split('.').pop();
+        const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 5)}.${fileExt}`;
+        coverUrl = await this.uploadFile('book_covers', fileName, coverFile);
+      }
+
+      const totalCopies = parseInt(bookData.totalCopies || 1);
+
+      const bookRow = {
+        library_id: libraryId,
+        title: bookData.title.trim(),
+        author: bookData.author ? bookData.author.trim() : null,
+        isbn: bookData.isbn ? bookData.isbn.trim() : null,
+        barcode: barcodeClean,
+        cover_url: coverUrl,
+        shelf_location: bookData.shelfLocation ? bookData.shelfLocation.trim() : 'N/A',
+        total_copies: totalCopies,
+        available_copies: totalCopies // Initially all copies are available
+      };
+
       const { data, error } = await this.client
         .from('books')
         .insert(bookRow)
         .select()
         .single();
-      
+
       if (error) throw error;
-      
+
       return {
         id: data.id,
         libraryId: data.library_id,
         title: data.title,
         author: data.author,
-        genre: data.genre,
         isbn: data.isbn,
-        copyCount: data.copy_count,
+        barcode: data.barcode,
+        coverUrl: data.cover_url,
         shelfLocation: data.shelf_location,
-        availability: data.availability,
+        totalCopies: data.total_copies,
+        availableCopies: data.available_copies,
         createdAt: data.created_at
       };
     } else {
+      // LocalStorage Mode
       const books = this._getLocal('smart_lib_books');
+      if (barcodeClean && books.some(b => b.libraryId === libraryId && b.barcode === barcodeClean)) {
+        throw new Error("A book with this Barcode is already registered.");
+      }
+
+      let coverUrl = null;
+      if (coverFile) {
+        coverUrl = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result);
+          reader.readAsDataURL(coverFile);
+        });
+      }
+
+      const totalCopies = parseInt(bookData.totalCopies || 1);
       const bookObj = {
-        id: id,
+        id: 'book_' + Math.random().toString(36).substr(2, 9),
         libraryId,
-        title: bookRow.title,
-        author: bookRow.author,
-        genre: bookRow.genre,
-        isbn: bookRow.isbn,
-        copyCount: bookRow.copy_count,
-        shelfLocation: bookRow.shelf_location,
-        availability: bookRow.availability,
+        title: bookData.title.trim(),
+        author: bookData.author ? bookData.author.trim() : 'N/A',
+        isbn: bookData.isbn ? bookData.isbn.trim() : 'N/A',
+        barcode: barcodeClean,
+        coverUrl: coverUrl,
+        shelfLocation: bookData.shelfLocation ? bookData.shelfLocation.trim() : 'N/A',
+        totalCopies: totalCopies,
+        availableCopies: totalCopies,
         createdAt: new Date().toISOString()
       };
       books.push(bookObj);
@@ -317,17 +547,58 @@ class SupabaseLibraryDB {
     }
   }
 
-  async updateBook(libraryId, bookId, bookData) {
-    const bookRow = {};
-    if (bookData.title !== undefined) bookRow.title = bookData.title.trim();
-    if (bookData.author !== undefined) bookRow.author = bookData.author.trim();
-    if (bookData.genre !== undefined) bookRow.genre = bookData.genre.trim();
-    if (bookData.isbn !== undefined) bookRow.isbn = bookData.isbn.trim();
-    if (bookData.copyCount !== undefined) bookRow.copy_count = parseInt(bookData.copyCount);
-    if (bookData.shelfLocation !== undefined) bookRow.shelf_location = bookData.shelfLocation.trim();
-    if (bookData.availability !== undefined) bookRow.availability = bookData.availability;
+  async updateBook(libraryId, bookId, bookData, coverFile = null) {
+    const barcodeClean = bookData.barcode ? bookData.barcode.trim() : null;
 
     if (this.isSupabase) {
+      // Fetch existing book record
+      const { data: oldBook, error: fetchErr } = await this.client
+        .from('books')
+        .select('*')
+        .eq('id', bookId)
+        .eq('library_id', libraryId)
+        .single();
+
+      if (fetchErr || !oldBook) throw new Error("Book record not found.");
+
+      // Check duplicate barcode
+      if (barcodeClean && barcodeClean !== oldBook.barcode) {
+        const { data: existing } = await this.client
+          .from('books')
+          .select('id')
+          .eq('library_id', libraryId)
+          .eq('barcode', barcodeClean)
+          .maybeSingle();
+
+        if (existing) {
+          throw new Error("A book with this Barcode is already registered.");
+        }
+      }
+
+      // Cover upload
+      let coverUrl = oldBook.cover_url;
+      if (coverFile) {
+        const fileExt = coverFile.name.split('.').pop();
+        const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 5)}.${fileExt}`;
+        coverUrl = await this.uploadFile('book_covers', fileName, coverFile);
+      }
+
+      // Adjust availability according to new total copies
+      const newTotal = parseInt(bookData.totalCopies || 1);
+      const copiesDiff = newTotal - oldBook.total_copies;
+      const newAvailable = Math.max(0, oldBook.available_copies + copiesDiff);
+
+      const bookRow = {
+        title: bookData.title.trim(),
+        author: bookData.author ? bookData.author.trim() : null,
+        isbn: bookData.isbn ? bookData.isbn.trim() : null,
+        barcode: barcodeClean,
+        cover_url: coverUrl,
+        shelf_location: bookData.shelfLocation ? bookData.shelfLocation.trim() : 'N/A',
+        total_copies: newTotal,
+        available_copies: newAvailable
+      };
+
       const { data, error } = await this.client
         .from('books')
         .update(bookRow)
@@ -335,26 +606,56 @@ class SupabaseLibraryDB {
         .eq('library_id', libraryId)
         .select()
         .single();
-      
+
       if (error) throw error;
-      
+
       return {
         id: data.id,
         libraryId: data.library_id,
         title: data.title,
         author: data.author,
-        genre: data.genre,
         isbn: data.isbn,
-        copyCount: data.copy_count,
+        barcode: data.barcode,
+        coverUrl: data.cover_url,
         shelfLocation: data.shelf_location,
-        availability: data.availability,
+        totalCopies: data.total_copies,
+        availableCopies: data.available_copies,
         createdAt: data.created_at
       };
     } else {
       const books = this._getLocal('smart_lib_books');
       const idx = books.findIndex(b => b.id === bookId && b.libraryId === libraryId);
       if (idx !== -1) {
-        books[idx] = { ...books[idx], ...bookData };
+        const oldBook = books[idx];
+        if (barcodeClean && barcodeClean !== oldBook.barcode && books.some(b => b.libraryId === libraryId && b.barcode === barcodeClean)) {
+          throw new Error("A book with this Barcode is already registered.");
+        }
+
+        let coverUrl = oldBook.coverUrl;
+        if (coverFile) {
+          coverUrl = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.readAsDataURL(coverFile);
+          });
+        }
+
+        const newTotal = parseInt(bookData.totalCopies || 1);
+        const copiesDiff = newTotal - oldBook.totalCopies;
+        const newAvailable = Math.max(0, oldBook.availableCopies + copiesDiff);
+
+        books[idx] = {
+          ...oldBook,
+          title: bookData.title.trim(),
+          author: bookData.author ? bookData.author.trim() : 'N/A',
+          isbn: bookData.isbn ? bookData.isbn.trim() : 'N/A',
+          barcode: barcodeClean,
+          coverUrl: coverUrl,
+          shelfLocation: bookData.shelfLocation ? bookData.shelfLocation.trim() : 'N/A',
+          totalCopies: newTotal,
+          availableCopies: newAvailable
+        };
+
         this._setLocal('smart_lib_books', books);
         return books[idx];
       }
@@ -385,19 +686,23 @@ class SupabaseLibraryDB {
       const { data, error } = await this.client
         .from('members')
         .select('*')
-        .eq('library_id', libraryId);
-      
+        .eq('library_id', libraryId)
+        .order('name');
+
       if (error) throw error;
-      
+
       return data.map(m => ({
         id: m.id,
         libraryId: m.library_id,
+        memberIdCustom: m.member_id_custom,
         username: m.username,
         name: m.name,
-        email: m.email,
-        phone: m.phone,
-        address: m.address,
+        email: m.email || 'N/A',
+        mobile: m.mobile || 'N/A',
+        address: m.address || 'N/A',
         password: m.password,
+        qrCodeUrl: m.qr_code_url,
+        joinDate: m.join_date,
         createdAt: m.created_at
       }));
     } else {
@@ -408,124 +713,155 @@ class SupabaseLibraryDB {
 
   async addMember(libraryId, memberData) {
     const usernameClean = memberData.username.trim().toLowerCase();
-    let id = "";
+    const mobileClean = memberData.mobile.trim();
+    const emailClean = memberData.email.trim().toLowerCase();
+
+    if (!/^[0-9]{10}$/.test(mobileClean)) {
+      throw new Error("Mobile number must be exactly 10 digits.");
+    }
+
+    const hashedPassword = await hashPassword(memberData.password);
 
     if (this.isSupabase) {
-      // 1. Fetch Library Short Code
-      let libCode = "CEN";
-      const { data: lib, error: libErr } = await this.client
-        .from('libraries')
-        .select('code, name')
-        .eq('id', libraryId)
-        .maybeSingle();
-      
-      if (lib) {
-        libCode = (lib.code ? lib.code : lib.name.slice(0, 3)).toUpperCase().trim();
-      }
-
-      // 2. Fetch all current member IDs for this library to find the max sequence
-      const { data: currentMembers, error: listErr } = await this.client
+      // 1. Uniqueness Checks
+      const { data: existingUser } = await this.client
         .from('members')
         .select('id')
+        .eq('username', usernameClean)
+        .maybeSingle();
+
+      if (existingUser) {
+        throw new Error("Student username already exists.");
+      }
+
+      if (emailClean) {
+        const { data: existingEmail } = await this.client
+          .from('members')
+          .select('id')
+          .eq('email', emailClean)
+          .maybeSingle();
+        if (existingEmail) throw new Error("Email address already registered.");
+      }
+
+      // 2. Fetch Library Short Code
+      let libCode = "1000";
+      const { data: lib } = await this.client
+        .from('libraries')
+        .select('library_code')
+        .eq('id', libraryId)
+        .single();
+
+      if (lib && lib.library_code) {
+        libCode = lib.library_code.trim();
+      }
+
+      // 3. Generate Custom ID Sequence
+      const { data: currentMembers } = await this.client
+        .from('members')
+        .select('member_id_custom')
         .eq('library_id', libraryId);
-      
+
       let maxSeq = 0;
-      if (!listErr && currentMembers && currentMembers.length > 0) {
+      if (currentMembers && currentMembers.length > 0) {
         currentMembers.forEach(m => {
-          const last4 = m.id.slice(-4);
-          const num = parseInt(last4, 10);
-          if (!isNaN(num) && num > maxSeq) {
-            maxSeq = num;
+          if (m.member_id_custom) {
+            const seqPart = m.member_id_custom.slice(-4);
+            const num = parseInt(seqPart, 10);
+            if (!isNaN(num) && num > maxSeq) {
+              maxSeq = num;
+            }
           }
         });
       }
-      
+
       const seq = maxSeq + 1;
       const seqStr = seq.toString().padStart(4, '0');
       const year = new Date().getFullYear();
-      
-      // Custom ID: Lib[Year][Code][Sequence]
-      id = `Lib${year}${libCode}${seqStr}`;
+      const memberIdCustom = `Lib${year}${libCode}${seqStr}`;
 
+      // 4. Generate QR code link using qrserver API
+      const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(memberIdCustom)}`;
+
+      // 5. Insert Member
       const memberRow = {
-        id: id,
         library_id: libraryId,
-        username: usernameClean,
+        member_id_custom: memberIdCustom,
         name: memberData.name.trim(),
-        email: memberData.email.trim(),
-        phone: memberData.phone.trim(),
         address: memberData.address ? memberData.address.trim() : null,
-        password: memberData.password
+        mobile: mobileClean,
+        email: emailClean,
+        username: usernameClean,
+        password: hashedPassword,
+        qr_code_url: qrCodeUrl
       };
-
-      // Uniqueness check in library
-      const { data: existing, error: queryErr } = await this.client
-        .from('members')
-        .select('id')
-        .eq('library_id', libraryId)
-        .eq('username', usernameClean);
-      
-      if (queryErr) throw queryErr;
-      if (existing && existing.length > 0) {
-        throw new Error("Student username already exists in this library.");
-      }
 
       const { data, error } = await this.client
         .from('members')
         .insert(memberRow)
         .select()
         .single();
-      
+
       if (error) throw error;
 
       return {
         id: data.id,
         libraryId: data.library_id,
+        memberIdCustom: data.member_id_custom,
         username: data.username,
         name: data.name,
         email: data.email,
-        phone: data.phone,
+        mobile: data.mobile,
         address: data.address,
         password: data.password,
+        qrCodeUrl: data.qr_code_url,
+        joinDate: data.join_date,
         createdAt: data.created_at
       };
     } else {
+      // LocalStorage Mode
       const members = this._getLocal('smart_lib_members');
       const libs = this._getLocal('smart_lib_libraries');
-      
-      const lib = libs.find(l => l.id === libraryId);
-      let libCode = "CEN";
-      if (lib) {
-        libCode = (lib.code ? lib.code : lib.name.slice(0, 3)).toUpperCase().trim();
+
+      if (members.some(m => m.username === usernameClean)) {
+        throw new Error("Student username already exists.");
       }
+      if (members.some(m => m.email === emailClean)) {
+        throw new Error("Email address already registered.");
+      }
+
+      const lib = libs.find(l => l.id === libraryId);
+      const libCode = lib ? lib.libraryCode : "1000";
 
       const libMembers = members.filter(m => m.libraryId === libraryId);
       let maxSeq = 0;
       libMembers.forEach(m => {
-        const last4 = m.id.slice(-4);
-        const num = parseInt(last4, 10);
-        if (!isNaN(num) && num > maxSeq) {
-          maxSeq = num;
+        if (m.memberIdCustom) {
+          const seqPart = m.memberIdCustom.slice(-4);
+          const num = parseInt(seqPart, 10);
+          if (!isNaN(num) && num > maxSeq) {
+            maxSeq = num;
+          }
         }
       });
+
       const seq = maxSeq + 1;
       const seqStr = seq.toString().padStart(4, '0');
       const year = new Date().getFullYear();
-      id = `Lib${year}${libCode}${seqStr}`;
-
-      if (members.some(m => m.libraryId === libraryId && m.username === usernameClean)) {
-        throw new Error("Student username already exists in this library.");
-      }
+      const memberIdCustom = `Lib${year}${libCode}${seqStr}`;
+      const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(memberIdCustom)}`;
 
       const memberObj = {
-        id: id,
+        id: 'mem_' + Math.random().toString(36).substr(2, 9),
         libraryId,
-        username: usernameClean,
+        memberIdCustom: memberIdCustom,
         name: memberData.name.trim(),
-        email: memberData.email.trim(),
-        phone: memberData.phone.trim(),
+        username: usernameClean,
+        email: emailClean,
+        mobile: mobileClean,
         address: memberData.address ? memberData.address.trim() : null,
-        password: memberData.password,
+        password: hashedPassword,
+        qrCodeUrl: qrCodeUrl,
+        joinDate: new Date().toISOString().split('T')[0],
         createdAt: new Date().toISOString()
       };
       members.push(memberObj);
@@ -535,14 +871,36 @@ class SupabaseLibraryDB {
   }
 
   async updateMember(libraryId, memberId, memberData) {
-    const memberRow = {};
-    if (memberData.name !== undefined) memberRow.name = memberData.name.trim();
-    if (memberData.email !== undefined) memberRow.email = memberData.email.trim();
-    if (memberData.phone !== undefined) memberRow.phone = memberData.phone.trim();
-    if (memberData.address !== undefined) memberRow.address = memberData.address.trim();
-    if (memberData.password !== undefined) memberRow.password = memberData.password;
+    const mobileClean = memberData.mobile.trim();
+    const emailClean = memberData.email.trim().toLowerCase();
+
+    if (!/^[0-9]{10}$/.test(mobileClean)) {
+      throw new Error("Mobile number must be exactly 10 digits.");
+    }
 
     if (this.isSupabase) {
+      // Uniqueness check for email
+      const { data: existingEmail } = await this.client
+        .from('members')
+        .select('id')
+        .eq('email', emailClean)
+        .neq('id', memberId)
+        .maybeSingle();
+
+      if (existingEmail) throw new Error("Email address already registered by another student.");
+
+      const memberRow = {
+        name: memberData.name.trim(),
+        email: emailClean,
+        mobile: mobileClean,
+        address: memberData.address ? memberData.address.trim() : null
+      };
+
+      // Support setting a new password if filled
+      if (memberData.password) {
+        memberRow.password = await hashPassword(memberData.password);
+      }
+
       const { data, error } = await this.client
         .from('members')
         .update(memberRow)
@@ -550,25 +908,45 @@ class SupabaseLibraryDB {
         .eq('library_id', libraryId)
         .select()
         .single();
-      
+
       if (error) throw error;
-      
+
       return {
         id: data.id,
         libraryId: data.library_id,
+        memberIdCustom: data.member_id_custom,
         username: data.username,
         name: data.name,
         email: data.email,
-        phone: data.phone,
+        mobile: data.mobile,
         address: data.address,
         password: data.password,
+        qrCodeUrl: data.qr_code_url,
+        joinDate: data.join_date,
         createdAt: data.created_at
       };
     } else {
       const members = this._getLocal('smart_lib_members');
       const idx = members.findIndex(m => m.id === memberId && m.libraryId === libraryId);
       if (idx !== -1) {
-        members[idx] = { ...members[idx], ...memberData };
+        const oldMember = members[idx];
+        if (members.some(m => m.email === emailClean && m.id !== memberId)) {
+          throw new Error("Email address already registered by another student.");
+        }
+
+        const updatedMember = {
+          ...oldMember,
+          name: memberData.name.trim(),
+          email: emailClean,
+          mobile: mobileClean,
+          address: memberData.address ? memberData.address.trim() : null
+        };
+
+        if (memberData.password) {
+          updatedMember.password = await hashPassword(memberData.password);
+        }
+
+        members[idx] = updatedMember;
         this._setLocal('smart_lib_members', members);
         return members[idx];
       }
@@ -578,25 +956,6 @@ class SupabaseLibraryDB {
 
   async deleteMember(libraryId, memberId) {
     if (this.isSupabase) {
-      // 1. Get all active issues for this member to reset books status
-      const { data: activeIssues, error: issueErr } = await this.client
-        .from('issues')
-        .select('book_id')
-        .eq('member_id', memberId)
-        .eq('library_id', libraryId)
-        .eq('status', 'issued');
-      
-      if (!issueErr && activeIssues && activeIssues.length > 0) {
-        const bookIds = activeIssues.map(i => i.book_id);
-        // Reset these books to 'available'
-        await this.client
-          .from('books')
-          .update({ availability: 'available' })
-          .in('id', bookIds)
-          .eq('library_id', libraryId);
-      }
-
-      // 2. Delete the member (cascades and deletes all issues records)
       const { error } = await this.client
         .from('members')
         .delete()
@@ -605,21 +964,19 @@ class SupabaseLibraryDB {
       if (error) throw error;
       return true;
     } else {
-      // LocalStorage Mode
       let members = this._getLocal('smart_lib_members');
       let issues = this._getLocal('smart_lib_issues');
       let books = this._getLocal('smart_lib_books');
 
-      // Find active books checked out by this member
-      const memberIssues = issues.filter(i => i.memberId === memberId && i.libraryId === libraryId && i.status === 'issued');
-      memberIssues.forEach(i => {
+      // Release any books issued by this member
+      const activeIssues = issues.filter(i => i.memberId === memberId && i.libraryId === libraryId && i.status === 'issued');
+      activeIssues.forEach(i => {
         const book = books.find(b => b.id === i.bookId && b.libraryId === libraryId);
         if (book) {
-          book.availability = 'available';
+          book.availableCopies = Math.min(book.totalCopies, book.availableCopies + 1);
         }
       });
 
-      // Filter out member and their issues
       members = members.filter(m => !(m.id === memberId && m.libraryId === libraryId));
       issues = issues.filter(i => !(i.memberId === memberId && i.libraryId === libraryId));
 
@@ -635,133 +992,173 @@ class SupabaseLibraryDB {
     if (this.isSupabase) {
       const { data, error } = await this.client
         .from('issues')
-        .select('*')
-        .eq('library_id', libraryId);
-      
+        .select(`
+          *,
+          book:books(*),
+          member:members(*)
+        `)
+        .eq('library_id', libraryId)
+        .order('issue_date', { ascending: false });
+
       if (error) throw error;
 
       return data.map(i => ({
         id: i.id,
         libraryId: i.library_id,
         bookId: i.book_id,
-        bookTitle: i.book_title,
+        bookTitle: i.book ? i.book.title : 'Deleted Book',
+        bookBarcode: i.book ? i.book.barcode : 'N/A',
         memberId: i.member_id,
-        memberName: i.member_name,
+        memberIdCustom: i.member ? i.member.member_id_custom : 'N/A',
+        memberName: i.member ? i.member.name : 'Deleted Student',
         issueDate: i.issue_date,
         dueDate: i.due_date,
         returnDate: i.return_date,
-        finePaid: parseFloat(i.fine_paid || 0),
+        fineAmount: parseFloat(i.fine_amount || 0),
         status: i.status
       }));
     } else {
       const issues = this._getLocal('smart_lib_issues');
-      return issues.filter(i => i.libraryId === libraryId);
+      const books = this._getLocal('smart_lib_books');
+      const members = this._getLocal('smart_lib_members');
+
+      const libIssues = issues.filter(i => i.libraryId === libraryId);
+      return libIssues.map(i => {
+        const book = books.find(b => b.id === i.bookId);
+        const member = members.find(m => m.id === i.memberId);
+        return {
+          id: i.id,
+          libraryId: i.libraryId,
+          bookId: i.bookId,
+          bookTitle: book ? book.title : 'Deleted Book',
+          bookBarcode: book ? book.barcode : 'N/A',
+          memberId: i.memberId,
+          memberIdCustom: member ? member.memberIdCustom : 'N/A',
+          memberName: member ? member.name : 'Deleted Student',
+          issueDate: i.issueDate,
+          dueDate: i.dueDate,
+          returnDate: i.returnDate,
+          fineAmount: i.fineAmount || 0,
+          status: i.status
+        };
+      });
     }
   }
 
-  async issueBook(libraryId, bookId, memberId, durationDays = 14) {
-    const issueDate = new Date();
-    const dueDate = new Date();
-    dueDate.setDate(issueDate.getDate() + parseInt(durationDays));
-
-    let resolvedBookId = bookId.trim();
-    let resolvedMemberId = memberId.trim();
-    let bookTitle = "";
-    let memberName = "";
+  async issueBook(libraryId, barcode, memberIdCustom, durationDays = 14) {
+    const barcodeClean = barcode.trim();
+    const customIdClean = memberIdCustom.trim();
 
     if (this.isSupabase) {
-      // 1. Resolve Book (ID or ISBN)
-      let { data: book, error: bErr } = await this.client
+      // 1. Fetch Book by barcode or UUID
+      let { data: book } = await this.client
         .from('books')
         .select('*')
-        .eq('id', resolvedBookId)
         .eq('library_id', libraryId)
+        .eq('barcode', barcodeClean)
         .maybeSingle();
 
       if (!book) {
-        // Try resolving by ISBN
-        const { data: bookIsbn } = await this.client
+        // Fallback: search by UUID
+        const { data: bookUuid } = await this.client
           .from('books')
           .select('*')
-          .eq('isbn', resolvedBookId)
           .eq('library_id', libraryId)
+          .eq('id', barcodeClean)
           .maybeSingle();
-        
-        book = bookIsbn;
+        book = bookUuid;
       }
 
-      if (!book) throw new Error("Book not found by ID or ISBN.");
-      if (book.availability !== 'available') throw new Error("Book is already issued.");
-      resolvedBookId = book.id;
-      bookTitle = book.title;
+      if (!book) throw new Error(`No book found with Barcode or ID: ${barcodeClean}`);
+      if (book.available_copies <= 0) throw new Error(`"${book.title}" has no available copies left for checkout.`);
 
-      // 2. Resolve Member (ID or Username)
-      let { data: member, error: mErr } = await this.client
+      // 2. Fetch Member by custom ID or UUID
+      let { data: member } = await this.client
         .from('members')
         .select('*')
-        .eq('id', resolvedMemberId)
         .eq('library_id', libraryId)
+        .eq('member_id_custom', customIdClean)
         .maybeSingle();
-      
+
       if (!member) {
-        // Try resolving by Username
-        const { data: memberUser } = await this.client
+        // Fallback: search by UUID or username
+        const { data: memberAlt } = await this.client
           .from('members')
           .select('*')
-          .eq('username', resolvedMemberId.toLowerCase())
           .eq('library_id', libraryId)
+          .or(`id.eq.${customIdClean},username.eq.${customIdClean.toLowerCase()}`)
           .maybeSingle();
-        
-        member = memberUser;
+        member = memberAlt;
       }
 
-      if (!member) throw new Error("Member not found by ID or Username.");
-      resolvedMemberId = member.id;
-      memberName = member.name;
+      if (!member) throw new Error(`No student found with ID: ${customIdClean}`);
 
-      // 3. Insert Issue log
-      const id = 'issue_' + Math.random().toString(36).substr(2, 9);
+      // 3. Check if member already has this book checked out
+      const { data: existingIssue } = await this.client
+        .from('issues')
+        .select('id')
+        .eq('library_id', libraryId)
+        .eq('book_id', book.id)
+        .eq('member_id', member.id)
+        .eq('status', 'issued')
+        .maybeSingle();
+
+      if (existingIssue) {
+        throw new Error(`This student already has an active issue record for "${book.title}".`);
+      }
+
+      // Check max borrowing limit
+      const { data: activeCount } = await this.client
+        .from('issues')
+        .select('id')
+        .eq('library_id', libraryId)
+        .eq('member_id', member.id)
+        .eq('status', 'issued');
+
+      const maxLimit = parseInt(localStorage.getItem("smart_lib_setting_max_books") || "5");
+      if (activeCount && activeCount.length >= maxLimit) {
+        throw new Error(`Checkout limit reached! This student already has ${activeCount.length} active checkouts (Limit: ${maxLimit}).`);
+      }
+
+      // 4. Calculate Dates
+      const issueDate = new Date();
+      const dueDate = new Date();
+      dueDate.setDate(issueDate.getDate() + parseInt(durationDays));
+
+      // 5. Insert Issue log (Trigger trg_issue_book automatically reduces available copies)
       const issueRow = {
-        id: id,
         library_id: libraryId,
-        book_id: resolvedBookId,
-        book_title: bookTitle,
-        member_id: resolvedMemberId,
-        member_name: memberName,
-        issue_date: issueDate.toISOString(),
+        book_id: book.id,
+        member_id: member.id,
         due_date: dueDate.toISOString(),
-        return_date: null,
-        fine_paid: 0,
         status: 'issued'
       };
 
       const { data: newIssue, error: iErr } = await this.client
         .from('issues')
         .insert(issueRow)
-        .select()
+        .select(`
+          *,
+          book:books(*),
+          member:members(*)
+        `)
         .single();
-      
-      if (iErr) throw iErr;
 
-      // 4. Update book status to 'issued'
-      const { error: updBookErr } = await this.client
-        .from('books')
-        .update({ availability: 'issued' })
-        .eq('id', resolvedBookId);
-      
-      if (updBookErr) console.error("Error updating book status:", updBookErr);
+      if (iErr) throw iErr;
 
       return {
         id: newIssue.id,
         libraryId: newIssue.library_id,
         bookId: newIssue.book_id,
-        bookTitle: newIssue.book_title,
+        bookTitle: newIssue.book ? newIssue.book.title : 'Book',
+        bookBarcode: newIssue.book ? newIssue.book.barcode : '',
         memberId: newIssue.member_id,
-        memberName: newIssue.member_name,
+        memberIdCustom: newIssue.member ? newIssue.member.member_id_custom : '',
+        memberName: newIssue.member ? newIssue.member.name : 'Student',
         issueDate: newIssue.issue_date,
         dueDate: newIssue.due_date,
         returnDate: newIssue.return_date,
-        finePaid: newIssue.fine_paid,
+        fineAmount: parseFloat(newIssue.fine_amount || 0),
         status: newIssue.status
       };
     } else {
@@ -770,117 +1167,205 @@ class SupabaseLibraryDB {
       const members = this._getLocal('smart_lib_members');
       const issues = this._getLocal('smart_lib_issues');
 
-      let book = books.find(b => b.id === resolvedBookId && b.libraryId === libraryId);
-      if (!book) {
-        book = books.find(b => b.isbn === resolvedBookId && b.libraryId === libraryId);
-        if (book) resolvedBookId = book.id;
+      let book = books.find(b => b.libraryId === libraryId && (b.barcode === barcodeClean || b.id === barcodeClean));
+      if (!book) throw new Error(`No book found with Barcode or ID: ${barcodeClean}`);
+      if (book.availableCopies <= 0) throw new Error(`"${book.title}" has no copies left.`);
+
+      let member = members.find(m => m.libraryId === libraryId && (m.memberIdCustom === customIdClean || m.id === customIdClean || m.username === customIdClean.toLowerCase()));
+      if (!member) throw new Error(`No student found with ID: ${customIdClean}`);
+
+      const alreadyHas = issues.some(i => i.libraryId === libraryId && i.bookId === book.id && i.memberId === member.id && i.status === 'issued');
+      if (alreadyHas) throw new Error("This student has already checked out this book.");
+
+      const activeList = issues.filter(i => i.libraryId === libraryId && i.memberId === member.id && i.status === 'issued');
+      const maxLimit = parseInt(localStorage.getItem("smart_lib_setting_max_books") || "5");
+      if (activeList.length >= maxLimit) {
+        throw new Error(`Checkout limit reached (${maxLimit} books).`);
       }
 
-      let member = members.find(m => m.id === resolvedMemberId && m.libraryId === libraryId);
-      if (!member) {
-        member = members.find(m => m.username === resolvedMemberId.toLowerCase() && m.libraryId === libraryId);
-        if (member) resolvedMemberId = member.id;
-      }
-
-      if (!book) throw new Error("Book not found by ID or ISBN.");
-      if (!member) throw new Error("Member not found by ID or Username.");
-      if (book.availability !== 'available') throw new Error("Book is already issued.");
-
-      bookTitle = book.title;
-      memberName = member.name;
+      const issueDate = new Date();
+      const dueDate = new Date();
+      dueDate.setDate(issueDate.getDate() + parseInt(durationDays));
 
       const newIssue = {
         id: 'issue_' + Math.random().toString(36).substr(2, 9),
         libraryId,
-        bookId: resolvedBookId,
-        bookTitle,
-        memberId: resolvedMemberId,
-        memberName,
+        bookId: book.id,
+        memberId: member.id,
         issueDate: issueDate.toISOString(),
         dueDate: dueDate.toISOString(),
         returnDate: null,
-        finePaid: 0,
+        fineAmount: 0,
         status: 'issued'
       };
 
-      book.availability = 'issued';
-      this._setLocal('smart_lib_books', books);
-
+      book.availableCopies = Math.max(0, book.availableCopies - 1);
       issues.push(newIssue);
+
+      this._setLocal('smart_lib_books', books);
       this._setLocal('smart_lib_issues', issues);
 
-      return newIssue;
+      return {
+        id: newIssue.id,
+        libraryId,
+        bookId: book.id,
+        bookTitle: book.title,
+        bookBarcode: book.barcode,
+        memberId: member.id,
+        memberIdCustom: member.memberIdCustom,
+        memberName: member.name,
+        issueDate: newIssue.issueDate,
+        dueDate: newIssue.dueDate,
+        returnDate: null,
+        fineAmount: 0,
+        status: 'issued'
+      };
     }
   }
 
-  async returnBook(libraryId, issueId, finePaid = 0) {
-    const returnDate = new Date().toISOString();
+  async returnBook(libraryId, memberIdCustom, barcode) {
+    const barcodeClean = barcode.trim();
+    const customIdClean = memberIdCustom.trim();
 
     if (this.isSupabase) {
-      // 1. Fetch current issue record to resolve book ID
-      const { data: issue, error: fetchErr } = await this.client
+      // 1. Fetch Book
+      let { data: book } = await this.client
+        .from('books')
+        .select('*')
+        .eq('library_id', libraryId)
+        .eq('barcode', barcodeClean)
+        .maybeSingle();
+
+      if (!book) {
+        const { data: bookUuid } = await this.client
+          .from('books')
+          .select('*')
+          .eq('library_id', libraryId)
+          .eq('id', barcodeClean)
+          .maybeSingle();
+        book = bookUuid;
+      }
+      if (!book) throw new Error(`No book found with Barcode/ID: ${barcodeClean}`);
+
+      // 2. Fetch Member
+      let { data: member } = await this.client
+        .from('members')
+        .select('*')
+        .eq('library_id', libraryId)
+        .eq('member_id_custom', customIdClean)
+        .maybeSingle();
+
+      if (!member) {
+        const { data: memberAlt } = await this.client
+          .from('members')
+          .select('*')
+          .eq('library_id', libraryId)
+          .or(`id.eq.${customIdClean},username.eq.${customIdClean.toLowerCase()}`)
+          .maybeSingle();
+        member = memberAlt;
+      }
+      if (!member) throw new Error(`No student found with ID: ${customIdClean}`);
+
+      // 3. Find active issue
+      const { data: activeIssue, error: fetchErr } = await this.client
         .from('issues')
         .select('*')
-        .eq('id', issueId)
         .eq('library_id', libraryId)
-        .single();
-      
-      if (fetchErr || !issue) throw new Error("Issue log not found.");
+        .eq('book_id', book.id)
+        .eq('member_id', member.id)
+        .eq('status', 'issued')
+        .maybeSingle();
 
-      // 2. Update issue log
-      const { error: updErr } = await this.client
+      if (fetchErr || !activeIssue) {
+        throw new Error(`No active checkout found for "${book.title}" issued to "${member.name}".`);
+      }
+
+      // 4. Update issue (Trigger trg_return_book increases copies, trg_calculate_fine sets fine_amount)
+      const returnDate = new Date().toISOString();
+      const { data: updatedIssue, error: updErr } = await this.client
         .from('issues')
         .update({
           return_date: returnDate,
-          status: 'returned',
-          fine_paid: finePaid
+          status: 'returned'
         })
-        .eq('id', issueId);
-      
+        .eq('id', activeIssue.id)
+        .select(`
+          *,
+          book:books(*),
+          member:members(*)
+        `)
+        .single();
+
       if (updErr) throw updErr;
 
-      // 3. Update book availability back to 'available'
-      const { error: bookErr } = await this.client
-        .from('books')
-        .update({ availability: 'available' })
-        .eq('id', issue.book_id);
-      
-      if (bookErr) console.error("Error setting book status to available:", bookErr);
-
       return {
-        id: issueId,
-        libraryId: libraryId,
-        bookId: issue.book_id,
-        bookTitle: issue.book_title,
-        memberId: issue.member_id,
-        memberName: issue.member_name,
-        issueDate: issue.issue_date,
-        dueDate: issue.due_date,
-        returnDate,
-        finePaid,
-        status: 'returned'
+        id: updatedIssue.id,
+        libraryId: updatedIssue.library_id,
+        bookId: updatedIssue.book_id,
+        bookTitle: updatedIssue.book ? updatedIssue.book.title : 'Book',
+        bookBarcode: updatedIssue.book ? updatedIssue.book.barcode : '',
+        memberId: updatedIssue.member_id,
+        memberIdCustom: updatedIssue.member ? updatedIssue.member.member_id_custom : '',
+        memberName: updatedIssue.member ? updatedIssue.member.name : 'Student',
+        issueDate: updatedIssue.issue_date,
+        dueDate: updatedIssue.due_date,
+        returnDate: updatedIssue.return_date,
+        fineAmount: parseFloat(updatedIssue.fine_amount || 0),
+        status: updatedIssue.status
       };
     } else {
-      const issues = this._getLocal('smart_lib_issues');
+      // LocalStorage Mode
       const books = this._getLocal('smart_lib_books');
+      const members = this._getLocal('smart_lib_members');
+      const issues = this._getLocal('smart_lib_issues');
 
-      const issue = issues.find(i => i.id === issueId && i.libraryId === libraryId);
-      if (!issue) throw new Error("Issue log not found.");
+      const book = books.find(b => b.libraryId === libraryId && (b.barcode === barcodeClean || b.id === barcodeClean));
+      if (!book) throw new Error("Book not found.");
+
+      const member = members.find(m => m.libraryId === libraryId && (m.memberIdCustom === customIdClean || m.id === customIdClean || m.username === customIdClean.toLowerCase()));
+      if (!member) throw new Error("Student not found.");
+
+      const idx = issues.findIndex(i => i.libraryId === libraryId && i.bookId === book.id && i.memberId === member.id && i.status === 'issued');
+      if (idx === -1) throw new Error(`No active checkout found for "${book.title}" borrowed by "${member.name}".`);
+
+      const issue = issues[idx];
+      const returnDate = new Date().toISOString();
+
+      // Calculate fine in JS for LocalStorage Mode
+      let fineVal = 0;
+      const settings = this._getLocal('smart_lib_settings').find(s => s.library_id === libraryId) || { fine_per_day: 1.0 };
+      const due = new Date(issue.dueDate);
+      const ret = new Date(returnDate);
+      if (ret > due) {
+        const diffTime = Math.abs(ret - due);
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        fineVal = diffDays * settings.fine_per_day;
+      }
 
       issue.returnDate = returnDate;
       issue.status = 'returned';
-      issue.finePaid = finePaid;
+      issue.fineAmount = fineVal;
 
-      // Update book status
-      const book = books.find(b => b.id === issue.bookId && b.libraryId === libraryId);
-      if (book) {
-        book.availability = 'available';
-      }
+      book.availableCopies = Math.min(book.totalCopies, book.availableCopies + 1);
 
-      this._setLocal('smart_lib_issues', issues);
       this._setLocal('smart_lib_books', books);
+      this._setLocal('smart_lib_issues', issues);
 
-      return issue;
+      return {
+        id: issue.id,
+        libraryId,
+        bookId: book.id,
+        bookTitle: book.title,
+        bookBarcode: book.barcode,
+        memberId: member.id,
+        memberIdCustom: member.memberIdCustom,
+        memberName: member.name,
+        issueDate: issue.issueDate,
+        dueDate: issue.dueDate,
+        returnDate,
+        fineAmount: fineVal,
+        status: 'returned'
+      };
     }
   }
 }
