@@ -96,10 +96,7 @@
             <input type="text" id="register-lib-code" class="form-control" placeholder="e.g., 1234" maxlength="4"
               pattern="^[0-9]{4}$" title="Must be exactly 4 digits (0-9)" required>
           </div>
-          <div class="form-group">
-            <label for="register-lib-image">Library Profile Image</label>
-            <input type="file" id="register-lib-image" class="form-control" accept="image/*">
-          </div>
+
           <div class="form-group">
             <label for="register-admin-user">Admin Username</label>
             <input type="text" id="register-admin-user" class="form-control" placeholder="Create username" required
@@ -144,6 +141,9 @@
           <li class="sidebar-link" onclick="switchDashboardTab('admin-sub-desk', this)">
             <i class="fa-solid fa-clipboard-list"></i> <span>Issue/Return Desk</span>
           </li>
+          <li class="sidebar-link" onclick="switchDashboardTab('admin-sub-shelf-finder', this)">
+            <i class="fa-solid fa-compass"></i> <span>Book's Shelf Finder</span>
+          </li>
           <li class="sidebar-link" onclick="switchDashboardTab('admin-sub-settings', this)">
             <i class="fa-solid fa-gears"></i> <span>Settings</span>
           </li>
@@ -166,7 +166,7 @@
             <h2 id="admin-section-title">Librarian Overview</h2>
           </div>
           <div class="dash-header-actions">
-            <span class="active-library-tag" id="admin-active-lib-badge">Library ID</span>
+            <span class="active-library-tag" id="admin-active-lib-badge" style="display: none;">Library ID</span>
           </div>
         </header>
 
@@ -323,7 +323,8 @@
 
           <!-- Subview 4: Issue / Return Desk -->
           <div id="admin-sub-desk" class="dash-subview">
-            <div class="checkout-panel-grid" style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 30px; align-items: start;">
+            <div class="checkout-panel-grid"
+              style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 30px; align-items: start;">
 
               <!-- Sequential Workspace Panel -->
               <div class="section-card glass-panel" style="margin-bottom: 0;">
@@ -345,9 +346,11 @@
                 </div>
 
                 <!-- Workflow Step 1: Scan Member -->
-                <div id="desk-step-member-container" class="glass-panel" style="padding: 20px; margin-bottom: 20px; border-left: 4px solid var(--color-primary);">
+                <div id="desk-step-member-container" class="glass-panel"
+                  style="padding: 20px; margin-bottom: 20px; border-left: 4px solid var(--color-primary);">
                   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                    <h4 style="font-size: 15px; text-transform: uppercase; color: var(--color-primary);">Step 1: Scan Student QR</h4>
+                    <h4 style="font-size: 15px; text-transform: uppercase; color: var(--color-primary);">Step 1: Scan
+                      Student QR</h4>
                     <span id="desk-step-member-badge" class="badge badge-danger">Awaiting Scan</span>
                   </div>
                   <div class="form-group" style="position: relative; margin-bottom: 0;">
@@ -364,9 +367,11 @@
                 </div>
 
                 <!-- Workflow Step 2: Scan Book Barcode -->
-                <div id="desk-step-book-container" class="glass-panel" style="padding: 20px; margin-bottom: 20px; border-left: 4px solid var(--text-muted); opacity: 0.6; pointer-events: none;">
+                <div id="desk-step-book-container" class="glass-panel"
+                  style="padding: 20px; margin-bottom: 20px; border-left: 4px solid var(--text-muted); opacity: 0.6; pointer-events: none;">
                   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                    <h4 style="font-size: 15px; text-transform: uppercase; color: var(--text-muted);">Step 2: Scan Book Barcode</h4>
+                    <h4 style="font-size: 15px; text-transform: uppercase; color: var(--text-muted);">Step 2: Scan Book
+                      Barcode</h4>
                     <span id="desk-step-book-badge" class="badge badge-danger">Locked</span>
                   </div>
                   <div class="form-group" style="position: relative; margin-bottom: 0;">
@@ -392,17 +397,20 @@
                       <option value="30">30 Days (Extended Loan)</option>
                     </select>
                   </div>
-                  <button type="button" id="desk-submit-btn" class="btn btn-success" style="width: 100%; height: 48px; font-size: 15px;" onclick="executeSequentialDeskOperation()">
+                  <button type="button" id="desk-submit-btn" class="btn btn-success"
+                    style="width: 100%; height: 48px; font-size: 15px;" onclick="executeSequentialDeskOperation()">
                     <i class="fa-solid fa-circle-check"></i> Complete Transaction
                   </button>
-                  <button type="button" class="btn btn-secondary" style="width: 100%; margin-top: 10px;" onclick="resetDeskWorkflow()">
+                  <button type="button" class="btn btn-secondary" style="width: 100%; margin-top: 10px;"
+                    onclick="resetDeskWorkflow()">
                     <i class="fa-solid fa-rotate-left"></i> Reset Scan Process
                   </button>
                 </div>
 
                 <!-- Simulated Scanning Helper -->
                 <div class="mock-scanner-helper" style="margin-top: 25px;">
-                  <p><i class="fa-solid fa-lightbulb"></i> <strong>Offline Simulator:</strong> Click a quick-code tag to simulate scanning a physical code.</p>
+                  <p><i class="fa-solid fa-lightbulb"></i> <strong>Offline Simulator:</strong> Click a quick-code tag to
+                    simulate scanning a physical code.</p>
                   <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 10px;">
                     <div>
                       <span style="font-size:12px; color: var(--text-secondary);">Simulate Student QR:</span>
@@ -418,49 +426,61 @@
 
               <!-- Interactive Display & Active Checkouts Panel -->
               <div style="display: flex; flex-direction: column; gap: 20px;">
-                
+
                 <!-- Scanned Entities Preview Cards -->
                 <div class="section-card glass-panel" style="margin-bottom: 0; padding: 20px;">
                   <div class="section-title" style="margin-bottom: 15px;">
                     <i class="fa-solid fa-magnifying-glass"></i>
                     <h3>Scanned Profiles Review</h3>
                   </div>
-                  
+
                   <div style="display: flex; flex-direction: column; gap: 15px;">
                     <!-- Student Card Preview -->
-                    <div id="preview-student-card" class="glass-panel" style="padding: 15px; display: none; background: rgba(var(--color-primary-rgb), 0.03); border: 1px dashed var(--color-primary);">
+                    <div id="preview-student-card" class="glass-panel"
+                      style="padding: 15px; display: none; background: rgba(var(--color-primary-rgb), 0.03); border: 1px dashed var(--color-primary);">
                       <div style="display: flex; gap: 15px; align-items: center;">
-                        <div class="profile-avatar" style="background: var(--color-primary); width: 45px; height: 45px; flex-shrink: 0;"><i class="fa-solid fa-user-graduate"></i></div>
+                        <div class="profile-avatar"
+                          style="background: var(--color-primary); width: 45px; height: 45px; flex-shrink: 0;"><i
+                            class="fa-solid fa-user-graduate"></i></div>
                         <div style="overflow: hidden; flex-grow: 1;">
                           <h4 id="preview-student-name" style="font-size: 15px; margin-bottom: 2px;">Name</h4>
-                          <div id="preview-student-id" style="font-size: 12px; color: var(--text-secondary); font-family: monospace;">ID: </div>
+                          <div id="preview-student-id"
+                            style="font-size: 12px; color: var(--text-secondary); font-family: monospace;">ID: </div>
                           <div style="display: flex; gap: 15px; margin-top: 6px; font-size: 11px;">
-                            <span>Active Issues: <strong id="preview-student-issues" style="color: var(--color-info);">0</strong></span>
-                            <span>Unpaid Fines: <strong id="preview-student-fines" style="color: var(--color-accent);">₹0.00</strong></span>
+                            <span>Active Issues: <strong id="preview-student-issues"
+                                style="color: var(--color-info);">0</strong></span>
+                            <span>Unpaid Fines: <strong id="preview-student-fines"
+                                style="color: var(--color-accent);">₹0.00</strong></span>
                           </div>
                         </div>
                       </div>
                     </div>
-                    
+
                     <!-- Book Card Preview -->
-                    <div id="preview-book-card" class="glass-panel" style="padding: 15px; display: none; background: rgba(5, 150, 105, 0.03); border: 1px dashed var(--color-secondary);">
+                    <div id="preview-book-card" class="glass-panel"
+                      style="padding: 15px; display: none; background: rgba(5, 150, 105, 0.03); border: 1px dashed var(--color-secondary);">
                       <div style="display: flex; gap: 15px; align-items: center;">
-                        <div id="preview-book-cover-container" style="width: 45px; height: 60px; background: #e2e8f0; border-radius: 4px; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0;">
+                        <div id="preview-book-cover-container"
+                          style="width: 45px; height: 60px; background: #e2e8f0; border-radius: 4px; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0;">
                           <i class="fa-solid fa-book" style="color: var(--text-muted);"></i>
                         </div>
                         <div style="overflow: hidden; flex-grow: 1;">
                           <h4 id="preview-book-title" style="font-size: 15px; margin-bottom: 2px;">Title</h4>
-                          <div id="preview-book-author" style="font-size: 12px; color: var(--text-secondary);">by Author</div>
+                          <div id="preview-book-author" style="font-size: 12px; color: var(--text-secondary);">by Author
+                          </div>
                           <div style="display: flex; gap: 15px; margin-top: 6px; font-size: 11px;">
-                            <span>Barcode: <strong id="preview-book-barcode" style="font-family: monospace;">Barcode</strong></span>
-                            <span>Available: <strong id="preview-book-available" style="color: var(--color-secondary);">0</strong></span>
+                            <span>Barcode: <strong id="preview-book-barcode"
+                                style="font-family: monospace;">Barcode</strong></span>
+                            <span>Available: <strong id="preview-book-available"
+                                style="color: var(--color-secondary);">0</strong></span>
                           </div>
                         </div>
                       </div>
                     </div>
-                    
+
                     <!-- Placeholder when nothing is scanned -->
-                    <div id="preview-desk-placeholder" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+                    <div id="preview-desk-placeholder"
+                      style="text-align: center; color: var(--text-muted); padding: 40px 0;">
                       <i class="fa-solid fa-qrcode" style="font-size: 32px; margin-bottom: 12px; opacity: 0.5;"></i>
                       <p style="font-size: 13px;">Scan member QR to initiate transaction.</p>
                     </div>
@@ -511,6 +531,17 @@
                 </div>
 
                 <div class="glass-panel"
+                  style="padding: 20px; border-left: 4px solid var(--color-info); background: rgba(2, 132, 199, 0.04);">
+                  <h4 style="margin-bottom: 8px; font-size: 16px;">Library ID Reference</h4>
+                  <div style="font-family: monospace; font-size: 14px; font-weight: 600; color: var(--text-primary); background: var(--bg-secondary); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); word-break: break-all; margin-top: 8px;" id="admin-settings-lib-id">
+                    <!-- Filled by JavaScript -->
+                  </div>
+                  <p style="font-size: 12px; color: var(--text-muted); margin-top: 8px; line-height: 1.4;">
+                    This unique identifier represents this library branch profile. Share it with your developer or reference it in Supabase connection sheets.
+                  </p>
+                </div>
+
+                <div class="glass-panel"
                   style="padding: 20px; border-left: 4px solid var(--color-warning); background: rgba(234, 88, 12, 0.04);">
                   <h4 style="margin-bottom: 8px; font-size: 16px;">Configured Fine Policies</h4>
                   <div style="display: flex; gap: 30px; margin-top: 15px; flex-wrap: wrap;">
@@ -531,6 +562,133 @@
                   Smart Library Platform &copy; 2026. Made By GS & AG (NYSOFT)
                 </div>
               </div>
+            </div>
+          </div>
+
+          <!-- Subview 6: Shelf Finder -->
+          <div id="admin-sub-shelf-finder" class="dash-subview">
+            <div class="checkout-panel-grid"
+              style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 30px; align-items: start;">
+
+              <!-- Left card: Input / Scan barcode -->
+              <div class="section-card glass-panel" style="margin-bottom: 0;">
+                <div class="section-header">
+                  <div class="section-title">
+                    <i class="fa-solid fa-barcode"></i>
+                    <h3>Scan or Enter Book Barcode</h3>
+                  </div>
+                </div>
+
+                <div class="glass-panel"
+                  style="padding: 20px; margin-bottom: 20px; border-left: 4px solid var(--color-secondary);">
+                  <h4
+                    style="font-size: 15px; text-transform: uppercase; color: var(--color-secondary); margin-bottom: 15px;">
+                    Locate Book Shelf</h4>
+                  <form id="form-shelf-finder" onsubmit="handleShelfFinderSearch(event)">
+                    <div class="form-group" style="position: relative; margin-bottom: 15px;">
+                      <label for="shelf-barcode-input">Book Barcode / ISBN / ID</label>
+                      <div style="display: flex; gap: 10px;">
+                        <input type="text" id="shelf-barcode-input" class="form-control"
+                          placeholder="Scan or enter book barcode" required>
+                        <button type="button" class="btn btn-secondary" onclick="openScannerFor('shelf-finder')">
+                          <i class="fa-solid fa-camera"></i> Scan
+                        </button>
+                      </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="width: 100%; height: 45px;">
+                      <i class="fa-solid fa-magnifying-glass"></i> Find Location
+                    </button>
+                  </form>
+                </div>
+
+                <!-- Helper list of books for easy demo in simulator -->
+                <div class="mock-scanner-helper">
+                  <p><i class="fa-solid fa-lightbulb"></i> <strong>Quick Simulator:</strong> Click a cataloged book
+                    title to simulate scanning/entering its barcode.</p>
+                  <div id="shelf-finder-mock-list" class="mock-qr-list" style="margin-top: 10px;"></div>
+                </div>
+              </div>
+
+              <!-- Right card: Display location and book details -->
+              <div class="section-card glass-panel" style="margin-bottom: 0; padding: 20px;">
+                <div class="section-title" style="margin-bottom: 15px;">
+                  <i class="fa-solid fa-compass"></i>
+                  <h3>Shelf Location Results</h3>
+                </div>
+
+                <div id="shelf-finder-results">
+                  <!-- Placeholder before search -->
+                  <div id="shelf-finder-placeholder"
+                    style="text-align: center; color: var(--text-muted); padding: 50px 0;">
+                    <i class="fa-solid fa-magnifying-glass"
+                      style="font-size: 36px; margin-bottom: 12px; opacity: 0.5;"></i>
+                    <p style="font-size: 14px;">Scan or type a book's barcode to find its shelf location.</p>
+                  </div>
+
+                  <!-- Success card (hidden initially) -->
+                  <div id="shelf-finder-success-card" style="display: none; animation: fadeIn 0.3s ease;">
+                    <div class="glass-panel"
+                      style="padding: 20px; border-left: 4px solid var(--color-secondary); background: rgba(5, 150, 105, 0.03); margin-bottom: 20px; display: flex; align-items: center; gap: 15px;">
+                      <div
+                        style="background: var(--color-secondary); color: white; width: 45px; height: 45px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px;">
+                        <i class="fa-solid fa-location-dot"></i>
+                      </div>
+                      <div>
+                        <span
+                          style="font-size: 12px; text-transform: uppercase; color: var(--color-secondary); font-weight: 600; letter-spacing: 0.05em;">SHELF
+                          LOCATION DETECTED</span>
+                        <h2 id="shelf-result-location"
+                          style="font-size: 24px; font-weight: 800; margin-top: 2px; color: var(--text-primary);">Shelf
+                          A-4</h2>
+                      </div>
+                    </div>
+
+                    <!-- Book details sub-panel -->
+                    <div class="glass-panel" style="padding: 20px;">
+                      <div style="display: flex; gap: 20px; align-items: flex-start;">
+                        <div id="shelf-result-cover-container"
+                          style="width: 70px; height: 95px; background: #e2e8f0; border-radius: 6px; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px solid var(--border-color); flex-shrink: 0;">
+                          <i class="fa-solid fa-book" style="font-size: 24px; color: var(--text-muted);"></i>
+                        </div>
+                        <div style="flex-grow: 1; overflow: hidden;">
+                          <h4 id="shelf-result-title"
+                            style="font-size: 18px; font-weight: 700; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                            Book Title</h4>
+                          <p id="shelf-result-author"
+                            style="font-size: 14px; color: var(--text-secondary); margin-bottom: 10px;">by Author</p>
+
+                          <div
+                            style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 12px; margin-top: 10px; border-top: 1px solid var(--border-color); padding-top: 10px;">
+                            <div>Barcode: <strong id="shelf-result-barcode" style="font-family: monospace;">-</strong>
+                            </div>
+                            <div>ISBN: <strong id="shelf-result-isbn" style="font-family: monospace;">-</strong></div>
+                            <div>Total Copies: <strong id="shelf-result-total-copies">-</strong></div>
+                            <div>Available Copies: <strong id="shelf-result-available-copies"
+                                style="color: var(--color-secondary);">-</strong></div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Error card (hidden initially) -->
+                  <div id="shelf-finder-error-card" style="display: none; animation: fadeIn 0.3s ease;">
+                    <div class="glass-panel"
+                      style="padding: 30px; text-align: center; border-left: 4px solid var(--color-accent); background: rgba(220, 38, 38, 0.03);">
+                      <i class="fa-solid fa-circle-exclamation"
+                        style="font-size: 40px; color: var(--color-accent); margin-bottom: 15px;"></i>
+                      <h4 style="font-size: 16px; font-weight: 700; margin-bottom: 8px;">Book Not Found</h4>
+                      <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.4; margin-bottom: 15px;">
+                        No book with the specified barcode, ISBN, or ID is registered in this library catalog.</p>
+                      <button class="btn btn-secondary btn-sm" onclick="openAddBookModalFromShelfFinder()">
+                        <i class="fa-solid fa-plus"></i> Catalog This Book
+                      </button>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+
             </div>
           </div>
 
@@ -727,7 +885,8 @@
         <div class="form-group">
           <label for="book-barcode">Barcode (Scan or Enter Code)</label>
           <div style="display: flex; gap: 10px;">
-            <input type="text" id="book-barcode" class="form-control" placeholder="Scan barcode or enter unique identifier" required>
+            <input type="text" id="book-barcode" class="form-control"
+              placeholder="Scan barcode or enter unique identifier" required>
             <button type="button" class="btn btn-secondary" onclick="openScannerFor('add-book-barcode')">
               <i class="fa-solid fa-camera"></i> Scan Barcode
             </button>

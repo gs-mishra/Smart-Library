@@ -245,7 +245,6 @@ async function handleRegisterLibrarySubmit(e) {
   const code = document.getElementById("register-lib-code").value;
   const user = document.getElementById("register-admin-user").value;
   const pass = document.getElementById("register-admin-password").value;
-  const imageFile = document.getElementById("register-lib-image").files[0];
 
   if (code.length !== 4 || isNaN(code)) {
     showToast("Library Code must be exactly 4 digits.", "danger");
@@ -259,7 +258,7 @@ async function handleRegisterLibrarySubmit(e) {
 
   try {
     showLoading("Initializing library database profile...");
-    const newLib = await window.smartLibDB.registerLibrary(name, user, pass, code, imageFile);
+    const newLib = await window.smartLibDB.registerLibrary(name, user, pass, code);
     hideLoading();
     showToast(`Successfully registered library: ${newLib.name}!`, "success");
     e.target.reset();
@@ -321,7 +320,15 @@ function enterAdminDashboard() {
   switchView('admin-view');
   document.getElementById("admin-profile-name").textContent = currentSession.name;
   document.getElementById("admin-profile-lib").textContent = currentSession.libraryName;
-  document.getElementById("admin-active-lib-badge").textContent = `ID: ${currentSession.libraryId}`;
+  
+  const libBadge = document.getElementById("admin-active-lib-badge");
+  if (libBadge) {
+    libBadge.textContent = `ID: ${currentSession.libraryId}`;
+  }
+  const settingsLibId = document.getElementById("admin-settings-lib-id");
+  if (settingsLibId) {
+    settingsLibId.textContent = currentSession.libraryId;
+  }
 
   // Set default tab active
   const sidebarLinks = document.querySelectorAll("#admin-view .sidebar-link");
@@ -343,7 +350,6 @@ function switchDashboardTab(subviewId, element) {
     document.getElementById("admin-section-title").textContent = element.querySelector("span").textContent;
   }
 
-  // Load data relating to subview
   if (subviewId === 'admin-sub-overview') {
     loadAdminStatsAndRecent();
   } else if (subviewId === 'admin-sub-books') {
@@ -352,6 +358,8 @@ function switchDashboardTab(subviewId, element) {
     loadAdminMembersTable();
   } else if (subviewId === 'admin-sub-desk') {
     loadAdminDesk();
+  } else if (subviewId === 'admin-sub-shelf-finder') {
+    loadShelfFinderTab();
   } else if (subviewId === 'admin-sub-settings') {
     loadSettingsPanel();
   }
@@ -1624,6 +1632,12 @@ function handleQRScanSuccess(decodedText) {
       barcodeInput.value = targetText;
       fetchBookDetailsFromOpenLibrary(targetText);
     }
+  } else if (currentScannerTarget === 'shelf-finder') {
+    const shelfInput = document.getElementById("shelf-barcode-input");
+    if (shelfInput) {
+      shelfInput.value = targetText;
+      handleShelfFinderSearch();
+    }
   } else {
     // Default fallback to fill whatever was open or alert
     showToast(`Decoded: ${targetText}`, "info");
@@ -1827,5 +1841,96 @@ async function downloadMemberIDCard() {
   } catch (err) {
     console.error("Canvas export failed:", err);
     showToast("Failed to export ID Card image.", "danger");
+  }
+}
+
+// ==========================================
+// SHELF FINDER MODULE
+// ==========================================
+async function loadShelfFinderTab() {
+  try {
+    const libId = currentSession.libraryId;
+    allLibBooksList = await window.smartLibDB.getBooks(libId);
+    
+    // Clear inputs and results
+    document.getElementById("shelf-barcode-input").value = "";
+    document.getElementById("shelf-finder-placeholder").style.display = "block";
+    document.getElementById("shelf-finder-success-card").style.display = "none";
+    document.getElementById("shelf-finder-error-card").style.display = "none";
+    
+    // Populate mock/quick selector list
+    const mockContainer = document.getElementById("shelf-finder-mock-list");
+    if (mockContainer) {
+      mockContainer.innerHTML = "";
+      const displayBooks = allLibBooksList.slice(0, 8);
+      if (displayBooks.length === 0) {
+        mockContainer.innerHTML = `<span style="font-size:11px; color:var(--text-muted);">No books cataloged yet</span>`;
+      }
+      displayBooks.forEach(b => {
+        const span = document.createElement("span");
+        span.className = "mock-qr-tag";
+        span.textContent = b.title.slice(0, 15) + (b.title.length > 15 ? "..." : "");
+        span.title = `Barcode: ${b.barcode || b.isbn || b.id}`;
+        span.onclick = () => {
+          document.getElementById("shelf-barcode-input").value = b.barcode || b.isbn || b.id;
+          handleShelfFinderSearch();
+        };
+        mockContainer.appendChild(span);
+      });
+    }
+  } catch (err) {
+    console.error(err);
+    showToast("Error initializing Shelf Finder.", "danger");
+  }
+}
+
+function handleShelfFinderSearch(e) {
+  if (e) e.preventDefault();
+  const inputVal = document.getElementById("shelf-barcode-input").value.trim();
+  if (!inputVal) return;
+
+  const book = allLibBooksList.find(b => 
+    (b.barcode && b.barcode.toLowerCase() === inputVal.toLowerCase()) ||
+    (b.isbn && b.isbn.toLowerCase() === inputVal.toLowerCase()) ||
+    (b.id === inputVal)
+  );
+
+  document.getElementById("shelf-finder-placeholder").style.display = "none";
+  if (book) {
+    playScanChime(true);
+    showToast(`Book found! Shelf location: ${book.shelfLocation || 'N/A'}`, "success");
+    
+    document.getElementById("shelf-result-location").textContent = book.shelfLocation || 'N/A';
+    document.getElementById("shelf-result-title").textContent = book.title;
+    document.getElementById("shelf-result-author").textContent = `by ${book.author || 'Unknown'}`;
+    document.getElementById("shelf-result-barcode").textContent = book.barcode || 'N/A';
+    document.getElementById("shelf-result-isbn").textContent = book.isbn || 'N/A';
+    document.getElementById("shelf-result-total-copies").textContent = book.totalCopies || 1;
+    document.getElementById("shelf-result-available-copies").textContent = `${book.availableCopies} / ${book.totalCopies}`;
+
+    const coverContainer = document.getElementById("shelf-result-cover-container");
+    if (book.coverUrl) {
+      coverContainer.innerHTML = `<img src="${book.coverUrl}" style="width:100%; height:100%; object-fit:cover;">`;
+    } else {
+      coverContainer.innerHTML = `<i class="fa-solid fa-book" style="font-size: 24px; color: var(--text-muted);"></i>`;
+    }
+
+    document.getElementById("shelf-finder-success-card").style.display = "block";
+    document.getElementById("shelf-finder-error-card").style.display = "none";
+  } else {
+    playScanChime(false);
+    showToast("Book not found in database.", "danger");
+    
+    document.getElementById("shelf-finder-success-card").style.display = "none";
+    document.getElementById("shelf-finder-error-card").style.display = "block";
+  }
+}
+
+function openAddBookModalFromShelfFinder() {
+  const barcodeValue = document.getElementById("shelf-barcode-input").value.trim();
+  openAddBookModal();
+  if (barcodeValue) {
+    document.getElementById("book-barcode").value = barcodeValue;
+    fetchBookDetailsFromOpenLibrary(barcodeValue);
   }
 }
