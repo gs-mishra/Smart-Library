@@ -8,11 +8,27 @@ let currentScannerTarget = null; // 'book' or 'member' field target
 let currentDeskMode = 'issue'; // 'issue' or 'return'
 let scannedMember = null; // Resolved member object in sequental desk
 let scannedBook = null; // Resolved book object in sequential desk
-
 let appSettings = {
   fineRate: 1.00, // INR per day overdue
   maxBooksLimit: 5
 };
+
+// --- GLOBAL LOADING SPINNER CONTROLS ---
+function showLoading(message = "Processing request...") {
+  const overlay = document.getElementById("global-loading-overlay");
+  const msgEl = document.getElementById("global-loading-message");
+  if (overlay) {
+    if (msgEl) msgEl.textContent = message;
+    overlay.style.display = "flex";
+  }
+}
+
+function hideLoading() {
+  const overlay = document.getElementById("global-loading-overlay");
+  if (overlay) {
+    overlay.style.display = "none";
+  }
+}
 
 // Play audio chime for scanner notifications
 function playScanChime(isSuccess = true) {
@@ -242,12 +258,14 @@ async function handleRegisterLibrarySubmit(e) {
   }
 
   try {
-    showToast("Initializing library database profile...", "info");
+    showLoading("Initializing library database profile...");
     const newLib = await window.smartLibDB.registerLibrary(name, user, pass, code, imageFile);
+    hideLoading();
     showToast(`Successfully registered library: ${newLib.name}!`, "success");
     e.target.reset();
     switchPortalTab('login');
   } catch (err) {
+    hideLoading();
     showToast(err.message, "danger");
   }
 }
@@ -265,7 +283,9 @@ async function handleLoginSubmit(e) {
   }
 
   try {
+    showLoading("Authenticating credentials...");
     const session = await window.smartLibDB.loginUser(libraryId, user, pass, currentLoginRole);
+    hideLoading();
     currentSession = session;
 
     showToast(`Logged in successfully! Welcome, ${session.name}`, "success");
@@ -281,6 +301,7 @@ async function handleLoginSubmit(e) {
       enterStudentDashboard();
     }
   } catch (err) {
+    hideLoading();
     showToast(err.message, "danger");
   }
 }
@@ -402,10 +423,13 @@ async function loadAdminStatsAndRecent() {
 let cachedBooks = [];
 async function loadAdminBooksTable() {
   try {
+    showLoading("Loading books catalog...");
     cachedBooks = await window.smartLibDB.getBooks(currentSession.libraryId);
     populateBookFilterSelects(cachedBooks);
     renderBooksTable(cachedBooks);
+    hideLoading();
   } catch (err) {
+    hideLoading();
     showToast("Error loading books catalog.", "danger");
   }
 }
@@ -538,19 +562,21 @@ async function handleBookFormSubmit(e) {
 
   try {
     const libId = currentSession.libraryId;
-    showToast("Processing book credentials...", "info");
     if (id) {
-      // Update
+      showLoading("Updating book record in catalog...");
       await window.smartLibDB.updateBook(libId, id, data, coverFile);
+      hideLoading();
       showToast("Book record updated successfully.", "success");
     } else {
-      // Create
+      showLoading("Uploading cover and cataloging new book...");
       await window.smartLibDB.addBook(libId, data, coverFile);
+      hideLoading();
       showToast("Book added to catalog database.", "success");
     }
     closeModal("modal-book");
     loadAdminBooksTable();
   } catch (err) {
+    hideLoading();
     showToast(err.message, "danger");
   }
 }
@@ -571,12 +597,15 @@ async function deleteBookRecord(bookId) {
 let cachedMembers = [];
 async function loadAdminMembersTable() {
   try {
+    showLoading("Loading registered student members...");
     const libId = currentSession.libraryId;
     cachedMembers = await window.smartLibDB.getMembers(libId);
     const issues = await window.smartLibDB.getIssues(libId);
 
     renderMembersTable(cachedMembers, issues);
+    hideLoading();
   } catch (err) {
+    hideLoading();
     showToast("Error loading member registrations.", "danger");
   }
 }
@@ -691,9 +720,10 @@ async function handleMemberFormSubmit(e) {
 
   try {
     const libId = currentSession.libraryId;
-    showToast("Processing student profile database record...", "info");
     if (id) {
+      showLoading("Updating student details...");
       await window.smartLibDB.updateMember(libId, id, data);
+      hideLoading();
       showToast("Student profile updated.", "success");
       closeModal("modal-member");
       loadAdminMembersTable();
@@ -702,7 +732,9 @@ async function handleMemberFormSubmit(e) {
         showToast("Password is required for registration.", "danger");
         return;
       }
+      showLoading("Generating QR Code and registering student member...");
       const newMember = await window.smartLibDB.addMember(libId, data);
+      hideLoading();
       showToast("Student registered successfully! They can now log in.", "success");
       closeModal("modal-member");
       await loadAdminMembersTable();
@@ -710,6 +742,7 @@ async function handleMemberFormSubmit(e) {
       viewStudentIDCard(newMember.id);
     }
   } catch (err) {
+    hideLoading();
     showToast(err.message, "danger");
   }
 }
@@ -913,12 +946,16 @@ async function executeSequentialDeskOperation() {
   try {
     if (currentDeskMode === 'issue') {
       const days = document.getElementById("desk-days-input").value;
+      showLoading("Registering checkout issue transaction...");
       await window.smartLibDB.issueBook(libId, scannedBook.barcode, scannedMember.memberIdCustom, days);
+      hideLoading();
       playScanChime(true);
       showToast(`Book "${scannedBook.title}" successfully checked out!`, "success");
     } else {
       // Return mode
+      showLoading("Retrieving active checkouts...");
       const issues = await window.smartLibDB.getIssues(libId);
+      hideLoading();
       const activeIssue = issues.find(i => i.memberId === scannedMember.id && i.bookId === scannedBook.id && i.status === 'issued');
 
       if (!activeIssue) {
@@ -934,7 +971,9 @@ async function executeSequentialDeskOperation() {
         }
       }
 
+      showLoading("Settling checkout return transaction...");
       await window.smartLibDB.returnBook(libId, scannedMember.memberIdCustom, scannedBook.barcode);
+      hideLoading();
       playScanChime(true);
       showToast(`Book returned successfully. ${collectText}Status updated.`, "success");
     }
@@ -942,6 +981,7 @@ async function executeSequentialDeskOperation() {
     // Refresh desk
     await loadAdminDesk();
   } catch (err) {
+    hideLoading();
     playScanChime(false);
     showToast(err.message, "danger");
   }
@@ -1324,10 +1364,13 @@ async function loadStudentProfile() {
 let studentCachedBooks = [];
 async function loadStudentBrowseCatalog() {
   try {
+    showLoading("Loading library catalog books...");
     studentCachedBooks = await window.smartLibDB.getBooks(currentSession.libraryId);
     populateStudentFilterSelects(studentCachedBooks);
     renderStudentBooksGrid(studentCachedBooks);
+    hideLoading();
   } catch (err) {
+    hideLoading();
     showToast("Error loading catalog.", "danger");
   }
 }
